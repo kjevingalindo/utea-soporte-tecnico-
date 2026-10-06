@@ -1,0 +1,897 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Help Desk - Tickets</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <script>window.tailwind = window.tailwind || {}; window.tailwind.config = { corePlugins: { preflight: false } };</script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body class="dashboard-body">
+
+    <div class="app-container">
+        <!-- Sidebar Menu -->
+        <aside class="sidebar">
+            <div class="sidebar-brand">
+                <img src="https://andahuaylas.utea.edu.pe/wp-content/uploads/2022/01/bienvenido-portada.png" alt="Escudo UTEA Andahuaylas" class="utea-brand-logo" />
+                <h2>UTEA Help Desk</h2>
+            </div>
+
+            <nav class="sidebar-nav">
+                <a href="#" class="nav-item active" data-view="dashboard">
+                    <i class="ph ph-squares-four"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a href="#" class="nav-item" data-view="tickets">
+                    <i class="ph ph-kanban"></i>
+                    <span>Tickets</span>
+                </a>
+                <a href="#" class="nav-item" data-view="admin">
+                    <i class="ph ph-shield-check"></i>
+                    <span>Administración</span>
+                </a>
+                <a href="#" class="nav-item" data-view="configuracion">
+                    <i class="ph ph-gear-six"></i>
+                    <span>Configuración</span>
+                </a>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Topbar Header -->
+            <header class="topbar">
+                <div class="topbar-left flex items-center">
+                    <button class="menu-toggle" id="menuToggle"><i class="ph ph-list"></i></button>
+                    <div class="search-bar flex items-center">
+                        <i class="ph ph-magnifying-glass"></i>
+                        <input type="text" id="searchInput" placeholder="Buscar tickets...">
+                    </div>
+                </div>
+                
+                <div class="topbar-right flex items-center">
+                    <button class="btn-icon" id="darkModeToggle" title="Modo Oscuro" style="margin-right: 8px;">
+                        <i class="ph ph-moon"></i>
+                    </button>
+                    <button type="button" class="btn-create-ticket py-1.5 px-3 text-sm flex items-center" id="quickTicketOpen" aria-haspopup="dialog" aria-controls="quickTicketModal">
+                        <i class="ph ph-plus" aria-hidden="true"></i> Nuevo Ticket
+                    </button>
+                    <div class="notifications" id="notificationToggle">
+                        <i class="ph ph-bell"></i>
+                        <span class="badge" id="notifBadge" style="display:none;">0</span>
+                        <div class="dropdown-menu" id="notifMenu">
+                            <div class="notif-header" style="padding:12px 16px; border-bottom:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center;">
+                                <strong style="font-size:0.9rem;">Notificaciones</strong>
+                                <button id="btnMarcarLeidas" style="background:none; border:none; color:var(--action-primary); cursor:pointer; font-size:0.8rem; font-weight:500;">Marcar leídas</button>
+                            </div>
+                            <div id="notifContent">
+                                <div style="padding:24px 16px; text-align:center; color:var(--text-secondary); font-size:0.85rem;">Sin notificaciones</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="user-profile flex items-center">
+                        <div class="avatar" id="avatarLetra">U</div>
+                        <span id="usuarioActivo">Usuario</span>
+                        <span id="rolBadge" class="rol-badge"></span>
+                        <i class="ph ph-caret-down"></i>
+                        <div class="dropdown-menu">
+                            <button onclick="logout()"><i class="ph ph-sign-out"></i> Cerrar sesión</button>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <main class="dashboard-main">
+                
+                <!-- VIEW: DASHBOARD -->
+                <section id="view-dashboard" class="view-section active">
+                    <div class="utea-banner">
+                        <div class="utea-banner-overlay"></div>
+                        <div class="utea-banner-content">
+                            <div class="utea-banner-badge">Sede Andahuaylas</div>
+                            <h1>Universidad Tecnológica de los Andes</h1>
+                            <p>Soporte institucional y atención de incidencias académicas y administrativas</p>
+                        </div>
+                    </div>
+
+                    <!-- Saludo dinámico -->
+                    <div class="greeting-section" style="margin-bottom:32px;">
+                        <h2 id="greetingText" style="margin:0 0 4px 0; font-size:1.6rem; font-weight:600;">Bienvenido</h2>
+                        <p style="margin:0; color:var(--text-secondary); font-size:0.95rem;" id="greetingSubtext">Aquí tienes un resumen de tu actividad</p>
+                    </div>
+
+                    <div class="kpi-grid">
+                        <div class="kpi-card">
+                            <div class="kpi-icon" style="background:#e0f2fe; color:#0284c7;"><i class="ph-fill ph-ticket"></i></div>
+                            <div class="kpi-data">
+                                <h3>Total Tickets</h3>
+                                <p id="kpi-total">0</p>
+                            </div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-icon" style="background:#fef3c7; color:#d97706;"><i class="ph-fill ph-clock"></i></div>
+                            <div class="kpi-data">
+                                <h3>En atención</h3>
+                                <p id="kpi-pendientes">0</p>
+                            </div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-icon" style="background:#dcfce7; color:#16a34a;"><i class="ph-fill ph-check-circle"></i></div>
+                            <div class="kpi-data">
+                                <h3>Finalizados</h3>
+                                <p id="kpi-resueltos">0</p>
+                            </div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-icon" style="background:#f3e8ff; color:#9333ea;"><i class="ph-fill ph-chart-pie"></i></div>
+                            <div class="kpi-data">
+                                <h3>Tasa Resolución</h3>
+                                <p id="kpi-tasa">0%</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="dashboard-widgets">
+                        <!-- Widget Calendario -->
+                        <div class="widget-card incident-calendar">
+                            <div class="widget-header">
+                                <h3>Calendario de Incidencias</h3>
+                                <div class="calendar-nav">
+                                    <button id="prevMonth" type="button" aria-label="Mes anterior"><i class="ph-bold ph-caret-left"></i></button>
+                                    <span id="monthDisplay">Cargando...</span>
+                                    <button id="nextMonth" type="button" aria-label="Mes siguiente"><i class="ph-bold ph-caret-right"></i></button>
+                                </div>
+                            </div>
+                            <div class="calendar-grid" id="incidentCalendarGrid">
+                                <div class="cal-day-header">Dom</div>
+                                <div class="cal-day-header">Lun</div>
+                                <div class="cal-day-header">Mar</div>
+                                <div class="cal-day-header">Mié</div>
+                                <div class="cal-day-header">Jue</div>
+                                <div class="cal-day-header">Vie</div>
+                                <div class="cal-day-header">Sáb</div>
+                                <!-- Días generados por JS -->
+                            </div>
+                            <div class="calendar-legend" aria-label="Volumen diario de tickets">
+                                <span><i class="volume-dot volume-low"></i> Bajo (1–2)</span>
+                                <span><i class="volume-dot volume-medium"></i> Medio (3–5)</span>
+                                <span><i class="volume-dot volume-high"></i> Alto (6+)</span>
+                            </div>
+                            <section class="calendar-day-results" aria-live="polite">
+                                <div class="calendar-day-results-header">
+                                    <h4 id="calendarSelectedDate">Selecciona un día</h4>
+                                    <span id="calendarDayCount">0 tickets</span>
+                                </div>
+                                <div id="calendarDayTickets">
+                                    <p class="text-muted">Selecciona un día para ver sus incidencias.</p>
+                                </div>
+                            </section>
+                        </div>
+                        
+                        <!-- Widget Actividad Reciente -->
+                        <div class="widget-card">
+                            <div class="widget-header">
+                                <h3>Actividad Reciente</h3>
+                            </div>
+                            <div class="recent-activity" id="recentActivityList">
+                                <p class="text-muted">Cargando actividad...</p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW: TICKETS -->
+                <section id="view-tickets" class="view-section">
+                    <div class="dashboard-top-actions">
+                        <div class="filtros">
+                            <button class="filter-btn active" onclick="filtrar('todos', event)">Todos <span class="count" id="count-todos">0</span></button>
+                            <button class="filter-btn" onclick="filtrar('activos', event)">En atención <span class="count" id="count-activos">0</span></button>
+                            <button class="filter-btn" onclick="filtrar('finalizados', event)">Finalizados <span class="count" id="count-finalizados">0</span></button>
+                        </div>
+                    </div>
+
+                    <section class="table-container">
+                        <div class="table-header">
+                            <div class="col-checkbox"><input type="checkbox"></div>
+                            <div class="col-id">ID <i class="ph-fill ph-caret-up-down"></i></div>
+                            <div class="col-date">ACTUALIZADO <i class="ph-fill ph-caret-up-down"></i></div>
+                            <div class="col-name">NOMBRE <i class="ph-fill ph-caret-up-down"></i></div>
+                            <div class="col-subject">ASUNTO <i class="ph-fill ph-caret-up-down"></i></div>
+                            <div class="col-status">ESTADO <i class="ph-fill ph-caret-up-down"></i></div>
+                            <div class="col-replier">ÚLT. RESPUESTA <i class="ph-fill ph-caret-up-down"></i></div>
+                            <div class="col-priority">PRIORIDAD <i class="ph-fill ph-caret-up-down"></i></div>
+                            <div class="col-actions"></div>
+                        </div>
+                        
+                        <div id="tickets" class="tickets-table-body">
+                            <!-- Tickets se inyectan aqui -->
+                        </div>
+
+                        <!-- Controles de Paginación Servidor -->
+                        <div id="ticketsPagination" class="pagination-container" style="display:flex; justify-content:space-between; align-items:center; padding:14px 20px; border-top:1px solid var(--border-color); background:var(--bg-main); border-bottom-left-radius:12px; border-bottom-right-radius:12px; margin-top:10px;">
+                            <div style="font-size:0.85rem; color:var(--text-secondary);" id="paginacionInfo">
+                                Mostrando 0 de 0 tickets
+                            </div>
+                            <div style="display:flex; gap:8px; align-items:center;">
+                                <button id="btnPrevPage" class="btn-secondary btn-small" onclick="window.cambiarPaginaTickets(-1)" disabled><i class="ph ph-caret-left"></i> Anterior</button>
+                                <span id="pageIndicator" style="font-size:0.85rem; font-weight:600; padding:0 8px;">Página 1 de 1</span>
+                                <button id="btnNextPage" class="btn-secondary btn-small" onclick="window.cambiarPaginaTickets(1)" disabled>Siguiente <i class="ph ph-caret-right"></i></button>
+                            </div>
+                        </div>
+                    </section>
+                </section>
+
+                <!-- VIEW: ADMINISTRACION -->
+                <section id="view-admin" class="view-section">
+                    <div class="kpi-grid" style="margin-bottom:24px;">
+                        <div class="kpi-card">
+                            <div class="kpi-icon" style="background:#e0f2fe; color:#0284c7;"><i class="ph-fill ph-users"></i></div>
+                            <div class="kpi-data"><h3>Usuarios</h3><p id="admin-total-usuarios">0</p></div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-icon" style="background:#dcfce7; color:#16a34a;"><i class="ph-fill ph-shield-check"></i></div>
+                            <div class="kpi-data"><h3>Admins</h3><p id="admin-total-admins">0</p></div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-icon" style="background:#fef3c7; color:#d97706;"><i class="ph-fill ph-user-gear"></i></div>
+                            <div class="kpi-data"><h3>Usuarios regulares</h3><p id="admin-total-clientes">0</p></div>
+                        </div>
+                    </div>
+
+                    <div class="page-heading" style="display:flex; justify-content:space-between; align-items:center; gap:16px; margin:0 0 20px;">
+                        <h2 style="margin:0;">Administración</h2>
+                        <button type="button" class="btn-secondary" id="openAgendaModal" aria-haspopup="dialog" aria-controls="agendaModal">
+                            <i class="ph ph-calendar-check" aria-hidden="true"></i> Agenda de soluciones
+                        </button>
+                    </div>
+
+                    <div id="adminManagementGrid" class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="widget-card min-w-0">
+                        <div class="widget-header">
+                            <h3>Crear usuario administrativo</h3>
+                        </div>
+                        <form id="adminUserForm" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr)); gap:12px; align-items:end;">
+                            <div class="form-group">
+                                <label for="adminUsername" style="display:block; margin-bottom:8px; font-weight:600;">Usuario</label>
+                                <input id="adminUsername" type="text" placeholder="Ej. admin.soporte" class="modal-input" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="usuarioNombreCompleto" style="display:block; margin-bottom:8px; font-weight:600;">Nombre completo</label>
+                                <input id="usuarioNombreCompleto" type="text" placeholder="Ana García" class="modal-input" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="usuarioCorreoInstitucional" style="display:block; margin-bottom:8px; font-weight:600;">Correo institucional</label>
+                                <input id="usuarioCorreoInstitucional" type="email" placeholder="nombre@utea.edu.pe" class="modal-input" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="usuarioOficina" style="display:block; margin-bottom:8px; font-weight:600;">Oficina</label>
+                                <select id="usuarioOficina" class="modal-input" required>
+                                    <option value="">Cargando oficinas...</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="adminPassword" style="display:block; margin-bottom:8px; font-weight:600;">Contraseña</label>
+                                <input id="adminPassword" type="password" placeholder="••••••••" class="modal-input" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="adminRol" style="display:block; margin-bottom:8px; font-weight:600;">Rol</label>
+                                <select id="adminRol" class="modal-input" required>
+                                    <option value="admin">Administrador</option>
+                                    <option value="usuario">Usuario normal</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <button type="submit" class="btn-primary" style="width:100%;">Guardar usuario</button>
+                            </div>
+                        </form>
+                        <p id="adminUserMessage" style="margin:14px 0 0 0; color:var(--text-secondary); font-size:0.9rem;"></p>
+                    </div>
+
+                    <div class="widget-card min-w-0">
+                        <div class="widget-header">
+                            <h3>Gestión de oficinas</h3>
+                        </div>
+                        <form id="adminOfficeForm" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap:12px; align-items:end; margin-bottom:16px;">
+                            <input id="adminOfficeId" type="hidden">
+                            <div class="form-group">
+                                <label for="adminOfficeCode" style="display:block; margin-bottom:8px; font-weight:600;">Código</label>
+                                <input id="adminOfficeCode" type="text" placeholder="ADM" class="modal-input" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="adminOfficeName" style="display:block; margin-bottom:8px; font-weight:600;">Nombre</label>
+                                <input id="adminOfficeName" type="text" placeholder="Administración" class="modal-input" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="adminOfficeDesc" style="display:block; margin-bottom:8px; font-weight:600;">Descripción</label>
+                                <input id="adminOfficeDesc" type="text" placeholder="Descripción breve" class="modal-input">
+                            </div>
+                            <div class="form-group">
+                                <button type="submit" class="btn-primary" id="adminOfficeSubmit" style="width:100%;">Crear oficina</button>
+                            </div>
+                        </form>
+                        <div id="adminOficinasList" style="overflow-x:auto;">
+                            <p style="margin:0; color:var(--text-secondary);">Cargando oficinas...</p>
+                        </div>
+                    </div>
+
+                    <div class="widget-card min-w-0 lg:col-span-2">
+                        <div class="widget-header">
+                            <h3>Gestión de categorías</h3>
+                        </div>
+                        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr)); gap:12px; align-items:end; margin-bottom:16px;">
+                            <div class="form-group">
+                                <label for="adminCategoriaOficina" style="display:block; margin-bottom:8px; font-weight:600;">Oficina</label>
+                                <select id="adminCategoriaOficina" class="modal-input">
+                                    <option value="">Cargando oficinas...</option>
+                                </select>
+                            </div>
+                        </div>
+                        <form id="adminCategoriaForm" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap:12px; align-items:end; margin-bottom:16px;">
+                            <input id="adminCategoriaId" type="hidden">
+                            <div class="form-group">
+                                <label for="adminCategoriaCode" style="display:block; margin-bottom:8px; font-weight:600;">Código</label>
+                                <input id="adminCategoriaCode" type="text" placeholder="HARDWARE" class="modal-input" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="adminCategoriaName" style="display:block; margin-bottom:8px; font-weight:600;">Nombre</label>
+                                <input id="adminCategoriaName" type="text" placeholder="Hardware" class="modal-input" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="adminCategoriaPadre" style="display:block; margin-bottom:8px; font-weight:600;">Categoría padre</label>
+                                <select id="adminCategoriaPadre" class="modal-input">
+                                    <option value="">Ninguna</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="adminCategoriaDesc" style="display:block; margin-bottom:8px; font-weight:600;">Descripción</label>
+                                <input id="adminCategoriaDesc" type="text" placeholder="Descripción" class="modal-input">
+                            </div>
+                            <div class="form-group">
+                                <button type="submit" class="btn-primary" id="adminCategoriaSubmit" style="width:100%;">Crear categoría</button>
+                            </div>
+                        </form>
+                        <div id="listaCategorías" style="overflow-x:auto;">
+                            <p style="margin:0; color:var(--text-secondary);">Selecciona una oficina para ver la jerarquía de categorías.</p>
+                        </div>
+                    </div>
+                    </div>
+
+                    <div class="widget-card">
+                        <div class="widget-header">
+                            <h3>Gestión de usuarios</h3>
+                        </div>
+                        <div class="admin-users-scroll w-full">
+                            <table class="admin-users-table w-full" style="width:100%; text-align:left; border-collapse:collapse; table-layout:fixed;">
+                                <thead>
+                                    <tr style="border-bottom:2px solid var(--border-color); color:var(--text-secondary); font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em;">
+                                        <th>Usuario</th>
+                                        <th>Nombre</th>
+                                        <th>Correo institucional</th>
+                                        <th>Oficina</th>
+                                        <th>Rol</th>
+                                        <th>Estado</th>
+                                        <th>Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="adminUsuariosBody">
+                                    <tr>
+                                        <td colspan="7" style="text-align:center; color:var(--text-secondary);">Cargando usuarios...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="view-configuracion" class="view-section">
+                    <div class="page-heading">
+                        <h2>Configuración</h2>
+                    </div>
+                    <section class="widget-card settings-section">
+                        <div class="widget-header">
+                            <h3>Preferencias de interfaz</h3>
+                        </div>
+                        <div class="settings-grid">
+                            <div class="form-group">
+                                <label for="configTheme">Apariencia</label>
+                                <select id="configTheme" class="modal-input">
+                                    <option value="light">Claro</option>
+                                    <option value="dark">Oscuro</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="configHomeView">Página inicial</label>
+                                <select id="configHomeView" class="modal-input">
+                                    <option value="dashboard">Dashboard</option>
+                                    <option value="tickets">Tickets</option>
+                                </select>
+                            </div>
+                        </div>
+                        <p class="settings-note">Las preferencias se guardan en este navegador.</p>
+                    </section>
+
+                    <section class="widget-card settings-section">
+                        <div class="widget-header">
+                            <h3>Cuenta y privilegios</h3>
+                        </div>
+                        <div class="settings-account-row">
+                            <div class="settings-account-icon"><i class="ph-fill ph-shield-check"></i></div>
+                            <div>
+                                <strong id="configAdminUsername">Administrador</strong>
+                                <p>Cuenta principal protegida</p>
+                            </div>
+                            <span class="settings-status">Administrador</span>
+                        </div>
+                        <p class="settings-note">La cuenta principal no se puede eliminar ni quitar del rol de administrador. El rol admin conserva acceso completo a la gestión de tickets, usuarios, oficinas y categorías.</p>
+                    </section>
+                </section>
+
+                <!-- VIEW: CLIENTES -->
+                <section id="view-clientes" class="view-section">
+                    <div class="kpi-grid" style="margin-bottom:24px;">
+                        <div class="kpi-card">
+                            <div class="kpi-icon" style="background:#e0f2fe; color:#0284c7;"><i class="ph-fill ph-users"></i></div>
+                            <div class="kpi-data"><h3>Total Clientes</h3><p>5</p></div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-icon" style="background:#dcfce7; color:#16a34a;"><i class="ph-fill ph-crown"></i></div>
+                            <div class="kpi-data"><h3>Premium</h3><p>2</p></div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-icon" style="background:#fef3c7; color:#d97706;"><i class="ph-fill ph-ticket"></i></div>
+                            <div class="kpi-data"><h3>Tickets Activos</h3><p id="clientes-tickets-activos">7</p></div>
+                        </div>
+                    </div>
+                    <div class="widget-card">
+                        <div class="widget-header">
+                            <h3>Directorio de Clientes</h3>
+                        </div>
+                        <table style="width:100%; text-align:left; border-collapse:collapse;">
+                            <thead>
+                                <tr style="border-bottom:2px solid var(--border-color); color:var(--text-secondary); font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em;">
+                                    <th style="padding:12px;">Cliente</th>
+                                    <th style="padding:12px;">Contacto</th>
+                                    <th style="padding:12px;">Teléfono</th>
+                                    <th style="padding:12px;">Plan</th>
+                                    <th style="padding:12px;">Tickets</th>
+                                    <th style="padding:12px;">Estado</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr style="border-bottom:1px solid var(--border-color);">
+                                    <td style="padding:14px 12px;"><div style="display:flex; align-items:center; gap:10px;"><div style="width:32px;height:32px;border-radius:8px;background:#dbeafe;color:#1d4ed8;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:0.8rem;">TS</div><span style="font-weight:500;">TechSolutions S.A.</span></div></td>
+                                    <td style="padding:14px 12px; color:var(--text-secondary); font-size:0.9rem;">carlos@techsolutions.com</td>
+                                    <td style="padding:14px 12px; color:var(--text-secondary); font-size:0.9rem;">+504 9876-5432</td>
+                                    <td style="padding:14px 12px;"><span style="background:#dcfce7;color:#16a34a;padding:4px 10px;border-radius:4px;font-size:0.8rem;font-weight:500;">Premium</span></td>
+                                    <td style="padding:14px 12px; font-weight:600;">3</td>
+                                    <td style="padding:14px 12px;"><span style="display:inline-flex;align-items:center;gap:6px;font-size:0.8rem;color:#16a34a;"><i class="ph-fill ph-circle" style="font-size:8px;"></i> Activo</span></td>
+                                </tr>
+                                <tr style="border-bottom:1px solid var(--border-color);">
+                                    <td style="padding:14px 12px;"><div style="display:flex; align-items:center; gap:10px;"><div style="width:32px;height:32px;border-radius:8px;background:#f3e8ff;color:#9333ea;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:0.8rem;">CG</div><span style="font-weight:500;">Consultores Globales</span></div></td>
+                                    <td style="padding:14px 12px; color:var(--text-secondary); font-size:0.9rem;">maria@consultores.com</td>
+                                    <td style="padding:14px 12px; color:var(--text-secondary); font-size:0.9rem;">+504 2234-1100</td>
+                                    <td style="padding:14px 12px;"><span style="background:#f3f4f6;color:var(--text-secondary);padding:4px 10px;border-radius:4px;font-size:0.8rem;font-weight:500;">Estándar</span></td>
+                                    <td style="padding:14px 12px; font-weight:600;">1</td>
+                                    <td style="padding:14px 12px;"><span style="display:inline-flex;align-items:center;gap:6px;font-size:0.8rem;color:#16a34a;"><i class="ph-fill ph-circle" style="font-size:8px;"></i> Activo</span></td>
+                                </tr>
+                                <tr style="border-bottom:1px solid var(--border-color);">
+                                    <td style="padding:14px 12px;"><div style="display:flex; align-items:center; gap:10px;"><div style="width:32px;height:32px;border-radius:8px;background:#fef3c7;color:#d97706;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:0.8rem;">IM</div><span style="font-weight:500;">InnovaMedia Corp</span></div></td>
+                                    <td style="padding:14px 12px; color:var(--text-secondary); font-size:0.9rem;">pedro@innovamedia.io</td>
+                                    <td style="padding:14px 12px; color:var(--text-secondary); font-size:0.9rem;">+504 3312-4455</td>
+                                    <td style="padding:14px 12px;"><span style="background:#dcfce7;color:#16a34a;padding:4px 10px;border-radius:4px;font-size:0.8rem;font-weight:500;">Premium</span></td>
+                                    <td style="padding:14px 12px; font-weight:600;">2</td>
+                                    <td style="padding:14px 12px;"><span style="display:inline-flex;align-items:center;gap:6px;font-size:0.8rem;color:#16a34a;"><i class="ph-fill ph-circle" style="font-size:8px;"></i> Activo</span></td>
+                                </tr>
+                                <tr style="border-bottom:1px solid var(--border-color);">
+                                    <td style="padding:14px 12px;"><div style="display:flex; align-items:center; gap:10px;"><div style="width:32px;height:32px;border-radius:8px;background:#fee2e2;color:#dc2626;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:0.8rem;">LR</div><span style="font-weight:500;">LogiRed Express</span></div></td>
+                                    <td style="padding:14px 12px; color:var(--text-secondary); font-size:0.9rem;">ana@logired.hn</td>
+                                    <td style="padding:14px 12px; color:var(--text-secondary); font-size:0.9rem;">+504 8800-1234</td>
+                                    <td style="padding:14px 12px;"><span style="background:#f3f4f6;color:var(--text-secondary);padding:4px 10px;border-radius:4px;font-size:0.8rem;font-weight:500;">Estándar</span></td>
+                                    <td style="padding:14px 12px; font-weight:600;">1</td>
+                                    <td style="padding:14px 12px;"><span style="display:inline-flex;align-items:center;gap:6px;font-size:0.8rem;color:#d97706;"><i class="ph-fill ph-circle" style="font-size:8px;"></i> Pendiente</span></td>
+                                </tr>
+                                <tr>
+                                    <td style="padding:14px 12px;"><div style="display:flex; align-items:center; gap:10px;"><div style="width:32px;height:32px;border-radius:8px;background:#e0f2fe;color:#0284c7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:0.8rem;">DS</div><span style="font-weight:500;">DataSoft Labs</span></div></td>
+                                    <td style="padding:14px 12px; color:var(--text-secondary); font-size:0.9rem;">jose@datasoft.com</td>
+                                    <td style="padding:14px 12px; color:var(--text-secondary); font-size:0.9rem;">+504 2200-8899</td>
+                                    <td style="padding:14px 12px;"><span style="background:#fef3c7;color:#d97706;padding:4px 10px;border-radius:4px;font-size:0.8rem;font-weight:500;">Básico</span></td>
+                                    <td style="padding:14px 12px; font-weight:600;">0</td>
+                                    <td style="padding:14px 12px;"><span style="display:inline-flex;align-items:center;gap:6px;font-size:0.8rem;color:#6b7280;"><i class="ph-fill ph-circle" style="font-size:8px;"></i> Inactivo</span></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- VIEW: REPORTES -->
+                <section id="view-reportes" class="view-section">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+                        <div>
+                            <h2 style="margin:0; font-size:1.4rem; font-weight:700;">Reportes e Indicadores TI UTEA</h2>
+                            <p style="margin:4px 0 0 0; color:var(--text-secondary); font-size:0.9rem;">Gestión gerencial de incidencias y nivel de servicio de la Sede Andahuaylas</p>
+                        </div>
+                        <div style="display:flex; gap:10px;">
+                            <button class="btn-primary" onclick="window.generarReportePDFMensual()"><i class="ph ph-file-pdf"></i> Reporte Mensual PDF</button>
+                            <button class="btn-secondary" onclick="window.exportarTicketsExcel()"><i class="ph ph-file-xls"></i> Exportar a Excel (CSV)</button>
+                        </div>
+                    </div>
+
+                    <div class="kpi-grid" style="margin-bottom:24px;">
+                        <div class="kpi-card">
+                            <div class="kpi-icon" style="background:#e0f2fe; color:#0284c7;"><i class="ph-fill ph-ticket"></i></div>
+                            <div class="kpi-data">
+                                <h3>Total Mensual</h3>
+                                <p id="rep-kpi-total">0</p>
+                            </div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-icon" style="background:#dcfce7; color:#16a34a;"><i class="ph-fill ph-check-circle"></i></div>
+                            <div class="kpi-data">
+                                <h3>Resueltos</h3>
+                                <p id="rep-kpi-resueltos">0</p>
+                            </div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-icon" style="background:#f3e8ff; color:#9333ea;"><i class="ph-fill ph-clock"></i></div>
+                            <div class="kpi-data">
+                                <h3>Tiempo Medio Solución</h3>
+                                <p id="rep-kpi-tiempo">2.4 hrs</p>
+                            </div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-icon" style="background:#fef3c7; color:#d97706;"><i class="ph-fill ph-star"></i></div>
+                            <div class="kpi-data">
+                                <h3>Satisfacción CSAT</h3>
+                                <p id="rep-kpi-csat">4.8 / 5</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-widgets" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));">
+                        <div class="widget-card">
+                            <div class="widget-header">
+                                <h3>Categorías con Más Fallas</h3>
+                            </div>
+                            <div id="repCategoriasList" style="display:flex; flex-direction:column; gap:12px;">
+                                <p class="text-muted">Cargando métricas...</p>
+                            </div>
+                        </div>
+
+                        <div class="widget-card">
+                            <div class="widget-header">
+                                <h3>Incidencias por Oficina</h3>
+                            </div>
+                            <div id="repOficinasList" style="display:flex; flex-direction:column; gap:12px;">
+                                <p class="text-muted">Cargando métricas...</p>
+                            </div>
+                        </div>
+
+                        <div class="widget-card">
+                            <div class="widget-header">
+                                <h3>Carga de Trabajo por Técnico</h3>
+                            </div>
+                            <div id="repTecnicosList" style="display:flex; flex-direction:column; gap:12px;">
+                                <p class="text-muted">Cargando métricas...</p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW: BASE DE CONOCIMIENTO -->
+                <section id="view-base" class="view-section">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+                        <div>
+                            <h2 style="margin:0; font-size:1.4rem; font-weight:700;">Base de Conocimiento UTEA</h2>
+                            <p style="margin:4px 0 0 0; color:var(--text-secondary); font-size:0.9rem;">Soluciones frecuentes y guías de auto-diagnóstico para problemas tecnológicos</p>
+                        </div>
+                        <div style="display:flex; gap:10px; align-items:center;">
+                            <input type="text" id="buscarBaseConocimiento" placeholder="Buscar soluciones..." class="modal-input" style="margin:0; min-width:260px;">
+                        </div>
+                    </div>
+
+                    <div id="baseConocimientoGrid" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap:16px;">
+                        <p class="text-muted" style="grid-column:1/-1; text-align:center; padding:40px;">Cargando base de conocimiento...</p>
+                    </div>
+                </section>
+
+                <!-- VIEW: PLANTILLAS RÁPIDAS -->
+                <section id="view-plantillas" class="view-section">
+                    <div class="dashboard-widgets" style="grid-template-columns: 1fr;">
+                        <div class="widget-card">
+                            <div class="widget-header">
+                                <h3>Plantillas de Respuesta Rápidas</h3>
+                                <button class="btn-primary">Crear Plantilla</button>
+                            </div>
+                            <ul style="list-style:none; padding:0; margin:0;">
+                                <li style="padding:12px; border-bottom:1px solid var(--border-color);">
+                                    <strong>[Bienvenida]</strong> Gracias por contactarnos, hemos recibido tu ticket...
+                                </li>
+                                <li style="padding:12px; border-bottom:1px solid var(--border-color);">
+                                    <strong>[Escalamiento]</strong> Tu caso ha sido escalado a nivel 2 para una revisión exhaustiva...
+                                </li>
+                                <li style="padding:12px;">
+                                    <strong>[Cierre]</strong> Confirmamos que el problema ha sido resuelto. Si necesitas más ayuda...
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW: INTEGRACIONES -->
+                <section id="view-integraciones" class="view-section">
+                    <div class="kpi-grid">
+                        <div class="kpi-card" style="justify-content:space-between;">
+                            <div style="display:flex; align-items:center; gap:16px;">
+                                <div class="kpi-icon" style="background:#f3f4f6;"><i class="ph-fill ph-slack-logo" style="color:#4a154b;"></i></div>
+                                <div>
+                                    <h3 style="margin:0 0 4px 0;">Slack</h3>
+                                    <p style="margin:0; font-size:0.85rem; color:var(--text-secondary);">Notificaciones de tickets</p>
+                                </div>
+                            </div>
+                            <span style="background:#dcfce7; color:#16a34a; padding:4px 8px; border-radius:4px; font-size:0.8rem; font-weight:bold;">Conectado</span>
+                        </div>
+                        <div class="kpi-card" style="justify-content:space-between;">
+                            <div style="display:flex; align-items:center; gap:16px;">
+                                <div class="kpi-icon" style="background:#f3f4f6;"><i class="ph-fill ph-envelope-simple" style="color:#ea4335;"></i></div>
+                                <div>
+                                    <h3 style="margin:0 0 4px 0;">Gmail / Workspace</h3>
+                                    <p style="margin:0; font-size:0.85rem; color:var(--text-secondary);">Creación por email</p>
+                                </div>
+                            </div>
+                            <button class="btn-small">Conectar</button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VIEW: AJUSTES -->
+                <section id="view-ajustes" class="view-section">
+                    <div class="widget-card">
+                        <h3>Ajustes del Sistema</h3>
+                        <p style="color:var(--text-secondary); margin-bottom:24px;">Configura las preferencias generales de AuraDesk.</p>
+                        
+                        <div class="form-group" style="margin-bottom:16px;">
+                            <label style="display:block; margin-bottom:8px; font-weight:500;">Nombre de la Empresa</label>
+                            <input type="text" value="AuraDesk Inc." class="modal-input" style="max-width:400px; margin:0;">
+                        </div>
+                        
+                        <div class="form-group" style="margin-bottom:16px;">
+                            <label style="display:block; margin-bottom:8px; font-weight:500;">Zona Horaria</label>
+                            <select class="modal-input" style="max-width:400px; margin:0;">
+                                <option>GMT-6 (América Central)</option>
+                                <option>GMT-5 (Colombia, Perú)</option>
+                                <option>GMT+1 (Madrid)</option>
+                            </select>
+                        </div>
+                        
+                        <button class="btn-primary">Guardar Cambios</button>
+                    </div>
+                </section>
+
+            </main>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div id="quickTicketOverlay" class="modal-overlay" style="display:none;"></div>
+    <section id="quickTicketModal" class="modal-card quick-ticket-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="quickTicketTitle" aria-hidden="true" tabindex="-1">
+        <div class="modal-header">
+            <h3 id="quickTicketTitle">Crear Ticket</h3>
+            <button type="button" class="close-btn" id="quickTicketClose" aria-label="Cerrar"><i class="ph ph-x"></i></button>
+        </div>
+        <form id="formTicket" class="inline-form ticket-create-form grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div class="form-group">
+                <input type="text" id="titulo" placeholder="Asunto del ticket" required>
+            </div>
+            <div class="form-group">
+                <input type="text" id="solicitanteNombre" placeholder="Nombre completo del solicitante" maxlength="150" required>
+            </div>
+            <div class="form-group">
+                <input type="text" id="codigoUniversitarioDni" placeholder="Código universitario o DNI" maxlength="40" required>
+            </div>
+            <div class="form-group">
+                <select id="tipoSolicitante" required>
+                    <option value="">Tipo de usuario...</option>
+                    <option value="estudiante">Estudiante</option>
+                    <option value="docente">Docente</option>
+                    <option value="administrativo">Administrativo</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <select id="carreraTicket" required>
+                    <option value="">Carrera / programa...</option>
+                    <option>Agronomía</option>
+                    <option>Ingeniería Civil</option>
+                    <option>Ingeniería Ambiental y Recursos Naturales</option>
+                    <option>Contabilidad</option>
+                    <option>Derecho</option>
+                    <option>Educación</option>
+                    <option>Enfermería</option>
+                </select>
+            </div>
+            <div class="form-group" id="asignaturaAreaGroup" hidden>
+                <input type="text" id="asignaturaArea" placeholder="Asignatura o área académica" maxlength="160" aria-label="Asignatura o área académica">
+            </div>
+            <div class="form-group">
+                <select id="ticketBloque" required>
+                    <option value="">Bloque...</option>
+                    <option value="Bloque A">Bloque A</option>
+                    <option value="Bloque B">Bloque B</option>
+                    <option value="Bloque C">Bloque C</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <select id="ticketAmbiente" required disabled>
+                    <option value="">Primero selecciona un bloque...</option>
+                </select>
+            </div>
+            <div class="form-group" id="ticketNumeroAulaContainer" hidden>
+                <input type="number" id="ticketNumeroAula" min="1" max="9999" step="1" placeholder="N° Aula (ej: 101, 201, 301)">
+            </div>
+            <div class="form-group">
+                <select id="impacto">
+                    <option value="Bajo">Impacto: Bajo</option>
+                    <option value="Medio" selected>Impacto: Medio</option>
+                    <option value="Alto">Impacto: Alto</option>
+                    <option value="Critico">Impacto: Crítico</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <select id="urgencia">
+                    <option value="Baja">Urgencia: Baja</option>
+                    <option value="Media" selected>Urgencia: Media</option>
+                    <option value="Alta">Urgencia: Alta</option>
+                    <option value="Critica">Urgencia: Crítica</option>
+                </select>
+            </div>
+            <div class="form-group form-group-full">
+                <textarea id="descripcion" placeholder="Descripción detallada" required></textarea>
+            </div>
+            <div id="autoDiagnosticBox" class="form-group-full" style="display:none;">
+                <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:16px; margin:4px 0 12px 0;">
+                    <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; color:#1e40af;">
+                        <i class="ph-bold ph-lightbulb" style="font-size:1.4rem;"></i>
+                        <h4 style="margin:0; font-size:1rem; font-weight:700;" id="autoDiagTitle">Auto-Diagnóstico Recomendado</h4>
+                    </div>
+                    <p id="autoDiagSintomas" style="margin:0 0 10px 0; font-size:0.88rem; color:#1e3a8a;"></p>
+                    <div style="background:#ffffff; border-radius:6px; padding:12px; border:1px solid #dbeafe; margin-bottom:12px;">
+                        <strong style="font-size:0.85rem; color:#1e40af; display:block; margin-bottom:8px;">Pasos recomendados antes de enviar el ticket:</strong>
+                        <div id="autoDiagPasos" style="font-size:0.85rem; color:#334155; display:flex; flex-direction:column; gap:6px;"></div>
+                    </div>
+                    <div style="background:#fef9c3; border:1px solid #fef08a; border-radius:6px; padding:10px; font-size:0.85rem; color:#854d0e; margin-bottom:12px;" id="autoDiagSolucion"></div>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <button type="button" class="btn-small" onclick="window.resolverConAutoDiag()" style="background:#16a34a; color:white; border:none; padding:8px 14px; border-radius:6px; cursor:pointer; font-weight:600;"><i class="ph ph-check-circle"></i> ¡Solucioné mi problema!</button>
+                        <button type="button" class="btn-small btn-secondary" onclick="window.ocultarAutoDiag()" style="padding:8px 14px; border-radius:6px; cursor:pointer;">Persiste el problema (Continuar)</button>
+                    </div>
+                </div>
+            </div>
+            <div class="form-group form-group-full">
+                <label for="fotoIncidencia" style="display:block; margin-bottom:8px; font-weight:600;">Foto de la incidencia (opcional)</label>
+                <input id="fotoIncidencia" type="file" accept="image/jpeg,image/png,image/webp" capture="environment">
+                <small style="display:block; margin-top:6px; color:var(--text-secondary);">JPG, PNG o WEBP. Máximo 10 MB.</small>
+            </div>
+            <div id="asignarTecnicoContainer" class="form-group" hidden>
+                <select id="asignarTecnico">
+                    <option value="">Asignar técnico...</option>
+                </select>
+            </div>
+            <div class="form-group form-actions">
+                <button type="button" class="px-4 py-2 text-sm font-medium text-slate-300 hover:text-white bg-slate-700/50 hover:bg-slate-700 rounded-lg transition-colors" id="quickTicketCancel">Cancelar</button>
+                <button type="submit" class="btn-primary">Enviar Ticket</button>
+            </div>
+        </form>
+    </section>
+
+    <div id="agendaModalOverlay" class="modal-overlay" style="display:none;"></div>
+    <section id="agendaModal" class="modal-card agenda-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="agendaModalTitle" aria-hidden="true" tabindex="-1">
+        <div class="modal-header">
+            <h3 id="agendaModalTitle">Agenda de soluciones</h3>
+            <button type="button" class="close-btn" id="closeAgendaModal" aria-label="Cerrar"><i class="ph ph-x"></i></button>
+        </div>
+        <div class="widget-header" style="margin-bottom:16px;">
+            <div style="display:flex; align-items:center; gap:10px;">
+                <button type="button" class="btn-small" onclick="moverMesAgenda(-1)" title="Mes anterior" aria-label="Mes anterior"><i class="ph ph-caret-left"></i></button>
+                <strong id="agendaMesActual"></strong>
+                <button type="button" class="btn-small" onclick="moverMesAgenda(1)" title="Mes siguiente" aria-label="Mes siguiente"><i class="ph ph-caret-right"></i></button>
+            </div>
+        </div>
+        <div id="agendaCalendario" style="display:grid; grid-template-columns:repeat(7, minmax(0, 1fr)); gap:6px;"></div>
+        <div id="agendaTicketsDia" style="margin-top:18px; border-top:1px solid var(--border-color); padding-top:16px;"></div>
+    </section>
+
+    <div id="ticketDetalle" class="modal-card" style="display:none;"></div>
+    <div id="overlay" style="display:none;" class="modal-overlay" onclick="cerrarDetalle()"></div>
+    
+    <div id="editarTicket" class="modal-card" style="display:none;">
+        <h3>Editar Ticket</h3>
+        <form id="editForm">
+            <input type="text" id="editTitulo" placeholder="Titulo" required class="modal-input">
+            <textarea id="editDescripcion" placeholder="Descripcion" required class="modal-textarea"></textarea>
+            <select id="editEstado" class="modal-select">
+                <option value="Creado">Creado</option>
+                <option value="Clasificado">Clasificado</option>
+                <option value="Asignado">Asignado</option>
+                <option value="En proceso">En proceso</option>
+                <option value="Esperando usuario">Esperando usuario</option>
+                <option value="Solucionado">Solucionado</option>
+                <option value="Cerrado">Cerrado</option>
+            </select>
+            <label class="modal-label">Asignar Técnico:</label>
+            <select id="editTecnico" class="modal-select">
+                <option value="">Seleccionar tecnico</option>
+            </select>
+            <div class="modal-actions">
+                <button type="button" class="btn-secondary" onclick="cerrarEdicion()">Cancelar</button>
+                <button type="submit" class="btn-primary">Guardar</button>
+            </div>
+        </form>
+    </div>
+
+    <div id="comentariosSection" class="modal-card" style="display:none;">
+        <div class="modal-header">
+            <h3>Comentarios</h3>
+            <button class="close-btn" onclick="cerrarComentarios()"><i class="ph ph-x"></i></button>
+        </div>
+        <div id="listaComentarios" class="comentarios-list"></div>
+        <textarea id="nuevoComentario" placeholder="Agregar comentario..." class="modal-textarea"></textarea>
+        <button onclick="agregarComentario()" class="btn-primary w-100">Agregar Comentario</button>
+    </div>
+
+    <!-- Modal de confirmación para eliminar -->
+    <div id="confirmModal" class="modal-card" style="display:none; max-width:380px; text-align:center;">
+        <div style="margin-bottom:20px;">
+            <div style="width:56px; height:56px; border-radius:50%; background:#fef2f2; color:#ef4444; display:flex; align-items:center; justify-content:center; font-size:1.5rem; margin:0 auto 16px auto;">
+                <i class="ph-fill ph-warning"></i>
+            </div>
+            <h3 style="margin:0 0 8px 0; font-size:1.1rem;">Eliminar ticket</h3>
+            <p style="margin:0; color:var(--text-secondary); font-size:0.9rem;">¿Estás seguro? Esta acción no se puede deshacer.</p>
+        </div>
+        <div style="display:flex; gap:12px; justify-content:center;">
+            <button id="confirmCancelar" class="btn-secondary" style="flex:1;">Cancelar</button>
+            <button id="confirmAceptar" class="btn-primary" style="flex:1; background:#ef4444;">Eliminar</button>
+        </div>
+    </div>
+
+    <div id="mensajes" class="toast-container"></div>
+    
+    <script>
+        // Dropdowns and menus
+        document.querySelector('.user-profile').addEventListener('click', function(e) {
+            e.stopPropagation();
+            const menu = this.querySelector('.dropdown-menu');
+            document.querySelectorAll('.dropdown-menu').forEach(m => {
+                if(m !== menu) m.classList.remove('show');
+            });
+            menu.classList.toggle('show');
+        });
+        
+        document.getElementById('notificationToggle').addEventListener('click', function(e) {
+            e.stopPropagation();
+            const menu = document.getElementById('notifMenu');
+            document.querySelectorAll('.dropdown-menu').forEach(m => {
+                if(m !== menu) m.classList.remove('show');
+            });
+            menu.classList.toggle('show');
+        });
+        
+        window.addEventListener('click', function(e) {
+            document.querySelectorAll('.dropdown-menu').forEach(menu => menu.classList.remove('show'));
+        });
+        
+        document.getElementById('menuToggle').addEventListener('click', function() {
+            document.querySelector('.sidebar').classList.toggle('collapsed');
+        });
+    </script>
+
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="messages.js"></script>
+    <script src="app.js"></script>
+    <script src="dashboard.js"></script>
+    <script src="authCheck.js"></script>
+
+</body>
+</html>

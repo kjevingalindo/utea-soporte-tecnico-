@@ -1,0 +1,3 @@
+ALTER TABLE tickets
+    ADD COLUMN bloque VARCHAR(20) NULL AFTER carrera,
+    ADD COLUMN ambiente VARCHAR(180) NULL AFTER bloque;
