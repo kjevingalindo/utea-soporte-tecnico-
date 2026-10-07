@@ -52,6 +52,8 @@ const notificationsRoutes = require('./routes/notifications');
 const catalogosRoutes = require('./routes/catalogos');
 const adjuntosRoutes = require('./routes/adjuntos');
 const diagnosticosRoutes = require('./routes/diagnosticos');
+const cuentasRoutes = require('./routes/cuentas.routes');
+const errorHandler = require('./middleware/errorHandler');
 
 app.use('/api/tecnicos', tecnicosRoutes);
 app.use('/api/stats', statsRoutes);
@@ -60,8 +62,10 @@ app.use('/api/notificaciones', notificationsRoutes);
 app.use('/api/catalogos', catalogosRoutes);
 app.use('/api/adjuntos', adjuntosRoutes);
 app.use('/api/diagnosticos', diagnosticosRoutes);
+app.use('/api/cuentas', cuentasRoutes);
+app.use(errorHandler);
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT || 3000);
 httpServer.listen(PORT, function() {
     console.log('Servidor corriendo en http://localhost:' + PORT);
 });

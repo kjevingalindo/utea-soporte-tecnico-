@@ -13,9 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return Promise.reject(new Error('La sesión expiró'));
         }
 
-        const headers = new Headers(options.headers || {});
-        headers.set('Authorization', `Bearer ${currentToken}`);
-        return window.fetch(url, { ...options, headers }).then(response => {
+        return window.fetchAPI(url, { ...options, allowHttpErrors: true }).then(response => {
             if (response.status === 401 || response.status === 403) {
                 localStorage.clear();
                 window.location.replace('/login.html');
@@ -29,6 +27,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const userRole = localStorage.getItem('userRole') || rol;
     const userRoleNormalizado = String(userRole || '').toLowerCase();
     const puedeAsignarTecnico = ['admin', 'superadmin', 'adminti'].includes(userRoleNormalizado);
+    const puedeGestionarCuentas = ['admin', 'superadmin', 'tecnico', 'adminti'].includes(userRoleNormalizado);
+    const accountStatsSection = document.getElementById('accountStatsSection');
+    if (accountStatsSection) accountStatsSection.hidden = !puedeGestionarCuentas;
     if (rol !== 'admin') {
         document.querySelector('.nav-item[data-view="admin"]')?.remove();
         document.getElementById('view-admin')?.remove();
@@ -46,7 +47,6 @@ document.addEventListener('DOMContentLoaded', () => {
         rolBadge.textContent = rol === 'admin' ? 'Admin' : 'Usuario';
         rolBadge.classList.add(rol === 'admin' ? 'rol-admin' : 'rol-usuario');
     }
-
     // Mostrar asignación de tecnico solo para admin
     if (puedeAsignarTecnico) {
         const asignarTecnicoContainer = document.getElementById('asignarTecnicoContainer');
@@ -70,20 +70,30 @@ document.addEventListener('DOMContentLoaded', () => {
         'Tópico': { oficina: 'TOP', categoria: 'TOP-ATENCION' },
         'Sala de Docentes': { oficina: 'SDOC', categoria: 'SDOC-EQUIPOS' },
         'Biblioteca': { oficina: 'BIB', categoria: 'BIB-EQUIPOS' },
-        'Laboratorio de Ingeniería Civil': { oficina: 'LAB', categoria: 'LAB-COMPUTADORAS' }
+        'Laboratorio de Ingeniería Civil': { oficina: 'LAB', categoria: 'LAB-COMPUTADORAS' },
+        'Asistencia': { oficina: 'ADM', categoria: 'ADM-ASISTENCIA' }
     };
     let oficinasCatalogoPromise;
     const categoriasPorOficina = new Map();
+    const getAuthHeaders = () => {
+        const token = localStorage.getItem('token');
+        return token ? { Authorization: `Bearer ${token}` } : {};
+    };
 
     async function resolverCatalogoAmbiente(ambiente) {
         const mapeo = catalogoPorAmbiente[ambiente];
         if (!mapeo) throw new Error('No existe un mapeo de oficina para el ambiente seleccionado');
 
         if (!oficinasCatalogoPromise) {
-            oficinasCatalogoPromise = fetch('/api/catalogos/oficinas').then(async response => {
+            oficinasCatalogoPromise = fetch('/api/catalogos/oficinas', {
+                headers: getAuthHeaders()
+            }).then(async response => {
                 const oficinas = await response.json();
                 if (!response.ok) throw new Error(oficinas.error || 'No se pudieron cargar las oficinas');
                 return oficinas;
+            }).catch(error => {
+                oficinasCatalogoPromise = null;
+                throw error;
             });
         }
         const oficinas = await oficinasCatalogoPromise;
@@ -92,10 +102,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (!categoriasPorOficina.has(oficina.id)) {
             const params = new URLSearchParams({ oficina_id: oficina.id });
-            const categoriasPromise = fetch(`/api/catalogos/categorias?${params}`).then(async response => {
+            const categoriasPromise = fetch(`/api/catalogos/categorias?${params}`, {
+                headers: getAuthHeaders()
+            }).then(async response => {
                 const categorias = await response.json();
                 if (!response.ok) throw new Error(categorias.error || 'No se pudieron cargar las categorías');
                 return categorias;
+            }).catch(error => {
+                categoriasPorOficina.delete(oficina.id);
+                throw error;
             });
             categoriasPorOficina.set(oficina.id, categoriasPromise);
         }
@@ -348,6 +363,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const tickets = await res.json();
             window.allTickets = tickets;
+            cargarMetricasReportes();
+            renderSupportSummary();
             window.dispatchEvent(new CustomEvent('tickets:loaded', { detail: tickets }));
             mostrarTickets(tickets);
             actualizarDashboardKPIs(tickets);
@@ -358,6 +375,376 @@ document.addEventListener('DOMContentLoaded', () => {
             mostrarLoading(false);
         }
     }
+
+    let accountIncidences = [];
+    let accountPlatformsChart = null;
+    let accountResolutionChart = null;
+
+    function formatearFechaCuenta(value) {
+        if (!value) return 'Fecha no disponible';
+        const normalized = typeof value === 'string' ? value.replace(' ', 'T') : value;
+        const date = new Date(normalized);
+        return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString('es-PE');
+    }
+
+    function renderAccountIncidents(container) {
+        if (!container) return;
+        container.replaceChildren();
+        if (!accountIncidences.length) {
+            const empty = document.createElement('p');
+            empty.className = 'text-muted';
+            empty.textContent = 'No hay incidencias de cuentas registradas.';
+            container.appendChild(empty);
+            return;
+        }
+
+        accountIncidences.slice(0, container.id === 'accountRecentIncidents' ? 5 : accountIncidences.length)
+            .forEach(incidencia => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'account-incident-row';
+                button.dataset.accountIncidentId = incidencia.id;
+
+                const main = document.createElement('span');
+                main.className = 'account-incident-main';
+                const title = document.createElement('strong');
+                title.textContent = `#${incidencia.id} · ${incidencia.plataforma || 'Cuenta institucional'}`;
+                const description = document.createElement('small');
+                description.textContent = `${incidencia.tipo_problema || 'Incidencia'} · ${incidencia.nombres || ''} ${incidencia.apellidos || ''}`.trim();
+                const date = document.createElement('small');
+                date.textContent = formatearFechaCuenta(incidencia.fecha_creacion);
+                main.append(title, description, date);
+
+                const status = document.createElement('span');
+                status.className = 'account-status-badge';
+                if (incidencia.estado === 'ESCALADO_ABANCAY') {
+                    status.classList.add('is-escalated');
+                    status.textContent = '↗ Escalado a Abancay';
+                } else {
+                    status.textContent = incidencia.estado || 'NUEVO';
+                }
+                button.append(main, status);
+                container.appendChild(button);
+            });
+    }
+
+    function renderAccountPlatformChart() {
+        const canvas = document.getElementById('accountPlatformsChart');
+        const message = document.getElementById('accountChartMessage');
+        if (!canvas || !message) return;
+
+        const currentMonth = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'America/Lima',
+            year: 'numeric',
+            month: '2-digit'
+        }).format(new Date());
+        const counts = new Map();
+        accountIncidences.forEach(incidencia => {
+            const date = String(incidencia.fecha_creacion || '').slice(0, 7);
+            if (date !== currentMonth) return;
+            const platform = incidencia.plataforma || 'Sin plataforma';
+            counts.set(platform, (counts.get(platform) || 0) + 1);
+        });
+        const entries = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+        if (accountPlatformsChart) {
+            accountPlatformsChart.destroy();
+            accountPlatformsChart = null;
+        }
+        if (!entries.length) {
+            message.textContent = 'Aún no hay incidencias de cuentas este mes.';
+            return;
+        }
+        if (typeof window.Chart !== 'function') {
+            message.textContent = 'No se pudo cargar Chart.js para mostrar el gráfico.';
+            return;
+        }
+
+        message.textContent = '';
+        accountPlatformsChart = new window.Chart(canvas, {
+            type: 'bar',
+            data: {
+                labels: entries.map(([name]) => name),
+                datasets: [{
+                    label: 'Incidencias este mes',
+                    data: entries.map(([, count]) => count),
+                    backgroundColor: ['#0b3f8a', '#7c3aed', '#f97316', '#0f766e', '#2563eb'],
+                    borderRadius: 7,
+                    maxBarThickness: 52
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                indexAxis: 'y',
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { beginAtZero: true, ticks: { precision: 0 } },
+                    y: { grid: { display: false } }
+                }
+            }
+        });
+    }
+
+    function renderAccountResolutionChart(stats) {
+        const canvas = document.getElementById('accountResolutionChart');
+        const fallback = document.getElementById('accountChartFallback');
+        const message = document.getElementById('accountResolutionChartMessage');
+        if (!canvas || !fallback || !message) return;
+
+        const locallyResolved = Number(stats.resueltos_localmente_pct) || 0;
+        const escalated = Number(stats.escalados_abancay_pct) || 0;
+        const other = Math.max(0, 100 - locallyResolved - escalated);
+        const values = [
+            ['Resueltos localmente (Andahuaylas)', locallyResolved],
+            ['Escalados a Abancay', escalated],
+            ['En atención / otros', other]
+        ];
+
+        if (accountResolutionChart) {
+            accountResolutionChart.destroy();
+            accountResolutionChart = null;
+        }
+        if (typeof window.Chart !== 'function') {
+            canvas.hidden = true;
+            fallback.hidden = false;
+            fallback.replaceChildren();
+            values.forEach(([label, value]) => {
+                const row = document.createElement('div');
+                row.className = 'account-chart-fallback-row';
+                const name = document.createElement('span');
+                name.textContent = label;
+                const percentage = document.createElement('strong');
+                percentage.textContent = `${Number(value.toFixed(2))}%`;
+                row.append(name, percentage);
+                fallback.appendChild(row);
+            });
+            message.textContent = 'Gráfico no disponible; se muestra el resumen en formato de lista.';
+            return;
+        }
+
+        canvas.hidden = false;
+        fallback.hidden = true;
+        message.textContent = '';
+        accountResolutionChart = new window.Chart(canvas, {
+            type: 'doughnut',
+            data: {
+                labels: values.map(([label]) => label),
+                datasets: [{
+                    data: values.map(([, value]) => Number(value.toFixed(2))),
+                    backgroundColor: ['#16a34a', '#9333ea', '#cbd5e1'],
+                    borderColor: ['#15803d', '#7e22ce', '#94a3b8'],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '62%',
+                plugins: {
+                    legend: { position: 'bottom' },
+                    tooltip: { callbacks: { label: context => `${context.label}: ${context.raw}%` } }
+                }
+            }
+        });
+    }
+
+    async function cargarIncidenciasCuentas() {
+        const list = document.getElementById('accountIncidentsList');
+        const recent = document.getElementById('accountRecentIncidents');
+        try {
+            const data = await window.CuentasApi.getIncidencias();
+            if (!Array.isArray(data)) throw new Error('La respuesta de incidencias de cuentas no es válida');
+            accountIncidences = data;
+            cargarMetricasReportes();
+            renderSupportSummary();
+            renderAccountIncidents(list);
+            renderAccountIncidents(recent);
+            if (puedeGestionarCuentas) renderAccountPlatformChart();
+        } catch (error) {
+            [list, recent].filter(Boolean).forEach(container => {
+                container.textContent = error.message;
+            });
+            const chartMessage = document.getElementById('accountChartMessage');
+            if (chartMessage) chartMessage.textContent = error.message;
+        }
+    }
+
+    async function cargarEstadisticasCuentas() {
+        try {
+            const data = await window.CuentasApi.getStats();
+            const total = document.getElementById('accountKpiTotal');
+            const resolved = document.getElementById('accountKpiLocal');
+            const escalated = document.getElementById('accountKpiEscalated');
+            if (total) total.textContent = data.total ?? 0;
+            if (resolved) resolved.textContent = `${Number(data.resueltos_localmente_pct || 0)}%`;
+            if (escalated) escalated.textContent = `${Number(data.escalados_abancay_pct || 0)}%`;
+            renderAccountResolutionChart(data);
+            renderAccountPlatformChart();
+        } catch (error) {
+            const chartMessage = document.getElementById('accountChartMessage');
+            if (chartMessage) chartMessage.textContent = error.message;
+            const resolutionMessage = document.getElementById('accountResolutionChartMessage');
+            if (resolutionMessage) resolutionMessage.textContent = error.message;
+        }
+    }
+
+    async function crearIncidenciaCuenta(event) {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const button = form.querySelector('button[type="submit"]');
+        button.disabled = true;
+        try {
+            const formData = new FormData(form);
+            const data = await window.CuentasApi.crearTicketCuenta(formData);
+            mostrarMensaje(data.mensaje || 'Solicitud de cuenta enviada correctamente', 'exito');
+            form.reset();
+            closeQuickTicket();
+            await cargarIncidenciasCuentas();
+        } catch (error) {
+            mostrarMensaje(error.message, 'error');
+        } finally {
+            button.disabled = false;
+        }
+    }
+
+    async function mostrarDetalleIncidenciaCuenta(id) {
+        const incidenciaId = Number(id);
+        if (!Number.isSafeInteger(incidenciaId) || incidenciaId < 1) return;
+        const detalle = document.getElementById('ticketDetalle');
+        const overlay = document.getElementById('overlay');
+        if (!detalle || !overlay) return;
+
+        detalle.innerHTML = '<div class="detalle-contenido"><p class="text-muted">Cargando incidencia...</p></div>';
+        detalle.style.display = 'block';
+        overlay.style.display = 'block';
+        try {
+            const data = await window.CuentasApi.getIncidencia(incidenciaId);
+            const incidencia = data.incidencia;
+            if (!incidencia) throw new Error('La respuesta no contiene la incidencia');
+
+            const statusClass = incidencia.estado === 'ESCALADO_ABANCAY'
+                ? 'account-status-badge is-escalated'
+                : 'account-status-badge';
+            const historyHTML = (data.historial || []).length
+                ? data.historial.map(item => `
+                    <article class="account-detail-entry">
+                        <strong>${escapeHTML(item.accion || 'Actualización')}</strong>
+                        <small style="display:block; color:var(--text-secondary); margin:4px 0;">
+                            ${escapeHTML(item.estado_anterior || '—')} → ${escapeHTML(item.estado_nuevo || '—')}
+                            · ${escapeHTML(formatearFechaCuenta(item.fecha))}
+                        </small>
+                        <span>${escapeHTML(item.comentario || '')}</span>
+                    </article>
+                `).join('')
+                : '<p class="text-muted">Aún no hay cambios registrados.</p>';
+            const evidenceHTML = (data.evidencias || []).length
+                ? data.evidencias.map(item => `
+                    <article class="account-detail-entry">
+                        <strong>${escapeHTML(item.nombre_original)}</strong>
+                        <small style="display:block; color:var(--text-secondary);">
+                            ${escapeHTML(item.tipo)} · ${escapeHTML(item.tipo_mime)}
+                            · ${(Number(item.tamano_bytes) / 1024 / 1024).toFixed(2)} MB
+                            · ${escapeHTML(formatearFechaCuenta(item.fecha_creacion))}
+                        </small>
+                    </article>
+                `).join('')
+                : '<p class="text-muted">Todavía no hay evidencias adjuntas.</p>';
+            const escalationHTML = puedeGestionarCuentas && incidencia.estado !== 'RESUELTO' &&
+                incidencia.estado !== 'ESCALADO_ABANCAY'
+                ? `<button type="button" class="btn-primary" data-open-escalation="${incidencia.id}"><i class="ph ph-arrow-fat-up"></i> Escalar a Abancay</button>`
+                : '';
+            const solutionHTML = puedeGestionarCuentas && incidencia.estado !== 'RESUELTO'
+                ? `<form id="accountSolutionForm" class="account-action-form" data-account-id="${incidencia.id}">
+                       <label for="accountSolution">Solución del técnico</label>
+                       <textarea id="accountSolution" name="solucion" maxlength="10000" required></textarea>
+                       <button type="submit" class="btn-primary">Registrar solución</button>
+                   </form>`
+                : incidencia.solucion
+                    ? `<div class="account-detail-entry"><strong>Solución:</strong><br>${escapeHTML(incidencia.solucion)}</div>`
+                    : '';
+            const uploadHTML = puedeGestionarCuentas
+                ? `<form id="accountEvidenceForm" class="account-action-form" data-account-id="${incidencia.id}">
+                       <label for="accountEvidenceType">Tipo de evidencia</label>
+                       <select id="accountEvidenceType" name="tipo" required>
+                           <option value="SOPORTE_ANDAHUAYLAS">Soporte Andahuaylas</option>
+                           <option value="SOPORTE_ABANCAY">Soporte Abancay</option>
+                       </select>
+                       <label for="accountEvidenceFile">Archivo</label>
+                       <input id="accountEvidenceFile" name="archivo" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" required>
+                       <button type="submit" class="btn-secondary"><i class="ph ph-upload-simple"></i> Adjuntar evidencia</button>
+                   </form>`
+                : '';
+            const escalamientosHTML = (data.escalamientos || []).length
+                ? `<div class="account-detail-list">${data.escalamientos.map(item => `
+                    <article class="account-detail-entry">
+                        <strong>${escapeHTML(item.origen)} → ${escapeHTML(item.destino)}</strong>
+                        <small style="display:block; color:var(--text-secondary);">${escapeHTML(item.estado)} · ${escapeHTML(formatearFechaCuenta(item.fecha_escalamiento))}</small>
+                        <span>${escapeHTML(item.motivo || '')}</span>
+                    </article>
+                `).join('')}</div>`
+                : '<p class="text-muted">Sin escalamientos.</p>';
+
+            detalle.innerHTML = `
+                <div class="detalle-contenido">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
+                        <div>
+                            <small style="color:var(--text-secondary);">Incidencia de cuenta #${incidencia.id}</small>
+                            <h3 style="margin:4px 0 12px;">${escapeHTML(incidencia.plataforma || 'Cuenta institucional')} · ${escapeHTML(incidencia.tipo_problema)}</h3>
+                        </div>
+                        <button class="close-btn" onclick="cerrarDetalle()" aria-label="Cerrar"><i class="ph ph-x"></i></button>
+                    </div>
+                    <div class="account-detail-actions">
+                        <span class="${statusClass}">${incidencia.estado === 'ESCALADO_ABANCAY' ? '↗ Escalado a Abancay' : escapeHTML(incidencia.estado)}</span>
+                        <span class="account-status-badge">${escapeHTML(incidencia.prioridad)}</span>
+                        ${escalationHTML}
+                    </div>
+                    <section class="account-detail-section">
+                        <h4>Datos de la solicitud</h4>
+                        <div class="account-detail-grid">
+                            <div><strong>Solicitante</strong><br>${escapeHTML(`${incidencia.nombres || ''} ${incidencia.apellidos || ''}`.trim())}</div>
+                            <div><strong>Tipo de usuario</strong><br>${escapeHTML(incidencia.tipo_usuario)}</div>
+                            <div><strong>DNI / Código</strong><br>${escapeHTML(incidencia.dni_codigo)}</div>
+                            <div><strong>Facultad</strong><br>${escapeHTML(incidencia.facultad || 'No especificada')}</div>
+                            <div><strong>Correo alternativo</strong><br>${escapeHTML(incidencia.correo_alternativo || 'No especificado')}</div>
+                            <div><strong>Oficina</strong><br>${escapeHTML(incidencia.oficina || 'No especificada')}</div>
+                            <div><strong>Creada</strong><br>${escapeHTML(formatearFechaCuenta(incidencia.fecha_creacion))}</div>
+                            ${incidencia.fecha_resolucion ? `<div><strong>Resuelta</strong><br>${escapeHTML(formatearFechaCuenta(incidencia.fecha_resolucion))}</div>` : ''}
+                            ${data.ticket ? `<div><strong>Ticket tradicional asociado</strong><br>#${escapeHTML(data.ticket.id)} · ${escapeHTML(data.ticket.titulo || '')}</div>` : ''}
+                        </div>
+                        <p style="white-space:pre-wrap; line-height:1.55;">${escapeHTML(incidencia.descripcion)}</p>
+                    </section>
+                    ${solutionHTML ? `<section class="account-detail-section"><h4>Solución</h4>${solutionHTML}</section>` : ''}
+                    <section class="account-detail-section">
+                        <h4>Historial de Cambios</h4>
+                        <div class="account-detail-list">${historyHTML}</div>
+                    </section>
+                    <section class="account-detail-section">
+                        <h4>Escalamiento entre sedes</h4>
+                        ${escalamientosHTML}
+                    </section>
+                    <section class="account-detail-section">
+                        <h4>Evidencias</h4>
+                        <div id="accountEvidenceList" class="account-detail-list">${evidenceHTML}</div>
+                        ${uploadHTML}
+                    </section>
+                    <div class="account-detail-section"><button type="button" class="btn-small" onclick="cerrarDetalle()">Cerrar</button></div>
+                </div>
+            `;
+        } catch (error) {
+            detalle.innerHTML = `<div class="detalle-contenido"><button class="close-btn" onclick="cerrarDetalle()" aria-label="Cerrar"><i class="ph ph-x"></i></button><p role="alert">${escapeHTML(error.message)}</p></div>`;
+        }
+    }
+
+    document.getElementById('accountIncidentsList')?.addEventListener('click', event => {
+        const button = event.target.closest('[data-account-incident-id]');
+        if (button) mostrarDetalleIncidenciaCuenta(button.dataset.accountIncidentId);
+    });
+    document.getElementById('accountRecentIncidents')?.addEventListener('click', event => {
+        const button = event.target.closest('[data-account-incident-id]');
+        if (button) mostrarDetalleIncidenciaCuenta(button.dataset.accountIncidentId);
+    });
+    document.getElementById('refreshAccountIncidents')?.addEventListener('click', cargarIncidenciasCuentas);
 
     function mostrarTickets(tickets) {
         const lista = document.getElementById('tickets');
@@ -1090,6 +1477,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.cerrarDetalle = () => {
         document.getElementById('ticketDetalle').style.display = 'none';
         document.getElementById('overlay').style.display = 'none';
+        if (escalationModal?.style.display === 'block') closeEscalation();
     };
 
     window.crearTicket = async (e) => {
@@ -1099,6 +1487,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const titulo = document.getElementById('titulo').value;
         const descripcion = document.getElementById('descripcion').value;
+        const categoria_usuario = document.getElementById('ticketCategoria').value;
         const impacto = document.getElementById('impacto').value;
         const urgencia = document.getElementById('urgencia').value;
         const bloque = document.getElementById('ticketBloque').value;
@@ -1124,6 +1513,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({
                     titulo,
                     descripcion,
+                    categoria_usuario,
                     impacto,
                     urgencia,
                     tecnico_id,
@@ -1374,6 +1764,7 @@ document.addEventListener('DOMContentLoaded', () => {
     tipoSolicitanteSelect?.addEventListener('change', sincronizarCampoAsignaturaDocente);
     sincronizarCampoAsignaturaDocente();
     document.getElementById('formTicket')?.addEventListener('submit', crearTicket);
+    document.getElementById('accountTicketForm')?.addEventListener('submit', crearIncidenciaCuenta);
 
     // SPA Routing Logic
     window.cambiarVista = (viewId) => {
@@ -1402,10 +1793,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const quickTicketModal = document.getElementById('quickTicketModal');
     const quickTicketOverlay = document.getElementById('quickTicketOverlay');
+    const escalationModal = document.getElementById('escalationModal');
+    const escalationOverlay = document.getElementById('escalationOverlay');
     const agendaModal = document.getElementById('agendaModal');
     const agendaModalOverlay = document.getElementById('agendaModalOverlay');
+    let activeEscalationId = null;
 
     function setDialogOpen(dialog, overlay, isOpen, trigger) {
+        if (window.modalController) {
+            window.modalController.setOpen(dialog, overlay, isOpen, trigger);
+            return;
+        }
         if (!dialog || !overlay) return;
         dialog.style.display = isOpen ? 'block' : 'none';
         dialog.setAttribute('aria-hidden', String(!isOpen));
@@ -1415,6 +1813,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const quickTicketTrigger = document.getElementById('quickTicketOpen');
+    const ticketTypeSelect = document.getElementById('ticketType');
+    const traditionalTicketForm = document.getElementById('formTicket');
+    const accountTicketForm = document.getElementById('accountTicketForm');
+    function synchronizeTicketType() {
+        const isAccount = ticketTypeSelect?.value === 'cuenta';
+        if (traditionalTicketForm) traditionalTicketForm.hidden = Boolean(isAccount);
+        if (accountTicketForm) accountTicketForm.hidden = !isAccount;
+        const title = document.getElementById('quickTicketTitle');
+        if (title) title.textContent = isAccount ? 'Solicitar acceso institucional' : 'Crear Ticket';
+        if (isAccount) window.ModalAcceso?.loadCatalogs();
+    }
+    ticketTypeSelect?.addEventListener('change', synchronizeTicketType);
+
     const ticketBloque = document.getElementById('ticketBloque');
     const ticketAmbiente = document.getElementById('ticketAmbiente');
     const ticketNumeroAula = document.getElementById('ticketNumeroAula');
@@ -1452,16 +1863,31 @@ document.addEventListener('DOMContentLoaded', () => {
             'Salones / Aulas',
             'Biblioteca',
             'Laboratorio de Ingeniería Civil'
+        ],
+        'Bloque de Asistencia': ['Asistencia']
+    };
+    const aliasAmbientes = {
+        'Bloque A': [
+            ['Aulas', 'Salones / Aulas'],
+            ['Laboratorios', 'Laboratorio de Agronomía y Ambiental']
+        ],
+        'Bloque C': [
+            ['Aulas', 'Salones / Aulas'],
+            ['Bibliotecas', 'Biblioteca'],
+            ['Laboratorios', 'Laboratorio de Ingeniería Civil']
         ]
     };
 
     ticketBloque?.addEventListener('change', () => {
-        const ambientes = ambientesPorBloque[ticketBloque.value] || [];
+        const ambientes = [
+            ...(ambientesPorBloque[ticketBloque.value] || []).map(ambiente => [ambiente, ambiente]),
+            ...(aliasAmbientes[ticketBloque.value] || [])
+        ];
         ticketAmbiente.replaceChildren(new Option(
             ambientes.length ? 'Selecciona un ambiente...' : 'Primero selecciona un bloque...',
             ''
         ));
-        ambientes.forEach(ambiente => ticketAmbiente.add(new Option(ambiente, ambiente)));
+        ambientes.forEach(([etiqueta, valor]) => ticketAmbiente.add(new Option(etiqueta, valor)));
         ticketAmbiente.disabled = ambientes.length === 0;
         actualizarCampoNumeroAula();
     });
@@ -1469,6 +1895,9 @@ document.addEventListener('DOMContentLoaded', () => {
     quickTicketTrigger?.addEventListener('click', () => {
         const formTicket = document.getElementById('formTicket');
         formTicket?.reset();
+        accountTicketForm?.reset();
+        if (ticketTypeSelect) ticketTypeSelect.value = 'soporte';
+        synchronizeTicketType();
         ticketBloque.value = '';
         ticketBloque.dispatchEvent(new Event('change'));
         sincronizarCampoAsignaturaDocente();
@@ -1476,10 +1905,84 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('titulo')?.focus();
     });
 
-    const closeQuickTicket = () => setDialogOpen(quickTicketModal, quickTicketOverlay, false, quickTicketTrigger);
+    const closeQuickTicket = () => {
+        window.modalController?.clearForms(quickTicketModal);
+        setDialogOpen(quickTicketModal, quickTicketOverlay, false, quickTicketTrigger);
+    };
+    document.querySelector('[data-account-cancel]')?.addEventListener('click', closeQuickTicket);
     document.getElementById('quickTicketClose')?.addEventListener('click', closeQuickTicket);
     document.getElementById('quickTicketCancel')?.addEventListener('click', closeQuickTicket);
     quickTicketOverlay?.addEventListener('click', closeQuickTicket);
+
+    const closeEscalation = () => setDialogOpen(escalationModal, escalationOverlay, false);
+    escalationOverlay?.addEventListener('click', closeEscalation);
+    document.querySelectorAll('[data-close-escalation]').forEach(button => {
+        button.addEventListener('click', closeEscalation);
+    });
+    document.getElementById('ticketDetalle')?.addEventListener('click', event => {
+        const button = event.target.closest('[data-open-escalation]');
+        if (!button) return;
+        activeEscalationId = Number(button.dataset.openEscalation);
+        document.getElementById('escalationForm')?.reset();
+        const area = document.getElementById('escalationArea');
+        if (area) area.value = 'Soporte de cuentas institucionales';
+        setDialogOpen(escalationModal, escalationOverlay, true);
+    });
+
+    document.getElementById('escalationForm')?.addEventListener('submit', async event => {
+        event.preventDefault();
+        if (!activeEscalationId) return;
+        const form = event.currentTarget;
+        const button = form.querySelector('button[type="submit"]');
+        const area = document.getElementById('escalationArea').value.trim();
+        const reason = document.getElementById('escalationReason').value.trim();
+        if (!area || !reason) {
+            mostrarMensaje('Indica el área de destino y el motivo del escalamiento', 'error');
+            return;
+        }
+        button.disabled = true;
+        try {
+            const data = await window.CuentasApi.escalarAAbancay(
+                activeEscalationId,
+                `Área destino en Abancay: ${area}\n\nMotivo: ${reason}`
+            );
+            closeEscalation();
+            mostrarMensaje(data.mensaje || 'Incidencia escalada a Abancay', 'exito');
+            await cargarIncidenciasCuentas();
+            await mostrarDetalleIncidenciaCuenta(activeEscalationId);
+        } catch (error) {
+            mostrarMensaje(error.message, 'error');
+        } finally {
+            button.disabled = false;
+        }
+    });
+
+    document.getElementById('ticketDetalle')?.addEventListener('submit', async event => {
+        const form = event.target;
+        if (form.id !== 'accountSolutionForm' && form.id !== 'accountEvidenceForm') return;
+        event.preventDefault();
+        const button = form.querySelector('button[type="submit"]');
+        button.disabled = true;
+        try {
+            let data;
+            if (form.id === 'accountSolutionForm') {
+                data = await window.CuentasApi.registrarSolucion(
+                    form.dataset.accountId,
+                    document.getElementById('accountSolution').value.trim()
+                );
+            } else {
+                const formData = new FormData(form);
+                data = await window.CuentasApi.subirEvidencia(form.dataset.accountId, formData);
+            }
+            mostrarMensaje(data.mensaje || 'Incidencia actualizada', 'exito');
+            await cargarIncidenciasCuentas();
+            await mostrarDetalleIncidenciaCuenta(form.dataset.accountId);
+        } catch (error) {
+            mostrarMensaje(error.message, 'error');
+        } finally {
+            button.disabled = false;
+        }
+    });
 
     const agendaTrigger = document.getElementById('openAgendaModal');
     agendaTrigger?.addEventListener('click', () => {
@@ -1493,6 +1996,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('keydown', event => {
         if (event.key !== 'Escape') return;
         if (quickTicketModal?.style.display === 'block') closeQuickTicket();
+        if (escalationModal?.style.display === 'block') closeEscalation();
         if (agendaModal?.style.display === 'block') closeAgenda();
     });
 
@@ -2065,6 +2569,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const filtered = window.allTickets.filter(t => 
                 (t.titulo && t.titulo.toLowerCase().includes(query)) || 
                 (t.username && t.username.toLowerCase().includes(query)) ||
+                (t.categoria_nombre && t.categoria_nombre.toLowerCase().includes(query)) ||
+                (t.oficina_nombre && t.oficina_nombre.toLowerCase().includes(query)) ||
                 (t.id && t.id.toString().includes(query))
             );
             mostrarTickets(filtered);
@@ -2072,41 +2578,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if(query.length > 0) {
                 cambiarVista('tickets');
             }
-        });
-    }
-
-    // Dark mode logic
-    const darkModeToggle = document.getElementById('darkModeToggle');
-    if (darkModeToggle) {
-        if (localStorage.getItem('theme') === 'dark') {
-            document.body.classList.add('dark-mode');
-            darkModeToggle.innerHTML = '<i class="ph-fill ph-sun"></i>';
-        }
-        
-        darkModeToggle.addEventListener('click', () => {
-            document.body.classList.toggle('dark-mode');
-            if (document.body.classList.contains('dark-mode')) {
-                localStorage.setItem('theme', 'dark');
-                darkModeToggle.innerHTML = '<i class="ph-fill ph-sun"></i>';
-            } else {
-                localStorage.setItem('theme', 'light');
-                darkModeToggle.innerHTML = '<i class="ph ph-moon"></i>';
-            }
-            const configTheme = document.getElementById('configTheme');
-            if (configTheme) configTheme.value = localStorage.getItem('theme');
-        });
-    }
-
-    const configTheme = document.getElementById('configTheme');
-    if (configTheme) {
-        configTheme.value = localStorage.getItem('theme') === 'dark' ? 'dark' : 'light';
-        configTheme.addEventListener('change', () => {
-            const darkMode = configTheme.value === 'dark';
-            document.body.classList.toggle('dark-mode', darkMode);
-            localStorage.setItem('theme', darkMode ? 'dark' : 'light');
-            if (darkModeToggle) darkModeToggle.innerHTML = darkMode
-                ? '<i class="ph-fill ph-sun"></i>'
-                : '<i class="ph ph-moon"></i>';
         });
     }
 
@@ -2569,6 +3040,577 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    const reportMonthSelect = document.getElementById('reportMonthSelect');
+
+    function currentReportMonth() {
+        const parts = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'America/Lima',
+            year: 'numeric',
+            month: '2-digit'
+        }).formatToParts(new Date());
+        const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+        return `${values.year}-${values.month}`;
+    }
+
+    function reportMonthLabel(monthKey) {
+        const [year, month] = monthKey.split('-').map(Number);
+        return new Date(Date.UTC(year, month - 1, 15, 12)).toLocaleDateString('es-PE', {
+            month: 'long',
+            year: 'numeric',
+            timeZone: 'America/Lima'
+        });
+    }
+
+    function reportTicketMonth(ticket) {
+        const date = new Date(ticket.fecha_creacion);
+        if (!Number.isFinite(date.getTime())) return '';
+        const parts = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'America/Lima',
+            year: 'numeric',
+            month: '2-digit'
+        }).formatToParts(date);
+        const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+        return `${values.year}-${values.month}`;
+    }
+
+    function getReportTickets() {
+        const monthKey = reportMonthSelect?.value || currentReportMonth();
+        const tickets = (window.allTickets || [])
+            .filter(ticket => reportTicketMonth(ticket) === monthKey)
+            .map(ticket => ({
+                ...ticket,
+                categoria_reporte: ticket.categoria_usuario || ticket.categoria_nombre
+            }));
+        const accountTickets = accountIncidences
+            .filter(incident => reportTicketMonth(incident) === monthKey)
+            .map(incident => ({
+                ...incident,
+                id: `CTA-${incident.id}`,
+                reportAccountId: incident.id,
+                titulo: `${incident.tipo_problema || 'Solicitud de acceso'} · ${incident.plataforma || 'Cuenta institucional'}`,
+                solicitante_nombre: [incident.nombres, incident.apellidos].filter(Boolean).join(' ') || '—',
+                categoria_nombre: 'Cuentas institucionales',
+                categoria_reporte: 'Cuentas institucionales',
+                oficina_nombre: incident.oficina || 'Soporte institucional',
+                tecnico: 'Soporte institucional',
+                estado: incident.estado === 'RESUELTO'
+                    ? 'Resuelto'
+                    : incident.estado === 'ESCALADO_ABANCAY'
+                        ? 'Escalado a Abancay'
+                        : incident.estado || 'Nuevo',
+                sla_resolved_at: incident.fecha_resolucion
+            }));
+        return [...tickets, ...accountTickets];
+    }
+
+    function isClosedReportTicket(ticket) {
+        return ['Solucionado', 'Cerrado', 'Resuelto'].includes(ticket.estado);
+    }
+
+    function reportMeanElapsedHours(tickets, endField) {
+        const durations = tickets.map(ticket => {
+            const created = new Date(ticket.fecha_creacion).getTime();
+            const rawEnd = ticket[endField];
+            const end = typeof rawEnd === 'number' || /^\d+$/.test(String(rawEnd || ''))
+                ? Number(rawEnd)
+                : new Date(rawEnd).getTime();
+            return Number.isFinite(created) && Number.isFinite(end) && end >= created
+                ? (end - created) / 3600000
+                : null;
+        }).filter(value => value !== null);
+        return durations.length ? durations.reduce((sum, value) => sum + value, 0) / durations.length : null;
+    }
+
+    function formatReportDuration(hours) {
+        if (hours === null) return 'Sin datos';
+        return hours >= 24 ? `${(hours / 24).toFixed(1)} días` : `${hours.toFixed(1)} h`;
+    }
+
+    function prepareReportMonths() {
+        if (!reportMonthSelect) return;
+        const currentMonth = currentReportMonth();
+        const months = new Set([currentMonth]);
+        (window.allTickets || []).forEach(ticket => {
+            const month = reportTicketMonth(ticket);
+            if (/^\d{4}-\d{2}$/.test(month)) months.add(month);
+        });
+        accountIncidences.forEach(incident => {
+            const month = reportTicketMonth(incident);
+            if (/^\d{4}-\d{2}$/.test(month)) months.add(month);
+        });
+        const selected = reportMonthSelect.value || currentMonth;
+        reportMonthSelect.replaceChildren(...[...months].sort().reverse().map(month =>
+            new Option(reportMonthLabel(month), month)
+        ));
+        reportMonthSelect.value = months.has(selected) ? selected : currentMonth;
+    }
+
+    function aggregateReportTickets(tickets, field, fallback) {
+        const counts = new Map();
+        tickets.forEach(ticket => {
+            const label = String(ticket[field] || fallback);
+            counts.set(label, (counts.get(label) || 0) + 1);
+        });
+        return [...counts.entries()]
+            .map(([label, count]) => ({ label, count }))
+            .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label, 'es'))
+            .slice(0, 8);
+    }
+
+    function renderReportBars(containerId, entries, clickable = false) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        container.replaceChildren();
+        if (!entries.length) {
+            const empty = document.createElement('p');
+            empty.className = 'text-muted';
+            empty.textContent = 'Sin incidencias registradas en este periodo.';
+            container.appendChild(empty);
+            return;
+        }
+
+        const max = Math.max(...entries.map(entry => entry.count));
+        entries.forEach(({ label, count }) => {
+            const item = document.createElement(clickable ? 'button' : 'div');
+            if (clickable) {
+                item.type = 'button';
+                item.className = 'report-bar report-bar-action';
+                item.dataset.reportCategory = label;
+                item.setAttribute('aria-label', `Ver incidencias de ${label}`);
+            } else {
+                item.className = 'report-bar';
+            }
+            const heading = document.createElement('span');
+            heading.className = 'report-bar-heading';
+            const name = document.createElement('span');
+            name.textContent = label;
+            const value = document.createElement('strong');
+            value.textContent = String(count);
+            heading.append(name, value);
+            const track = document.createElement('span');
+            track.className = 'report-bar-track';
+            const fill = document.createElement('span');
+            fill.className = 'report-bar-fill';
+            fill.style.width = `${Math.round(count * 100 / max)}%`;
+            track.appendChild(fill);
+            item.append(heading, track);
+            container.appendChild(item);
+        });
+    }
+
+    function renderReportDetails(tickets, monthKey) {
+        const body = document.getElementById('reportTicketsBody');
+        if (!body) return;
+        body.replaceChildren();
+        const countBadge = document.getElementById('reportMonthCount');
+        if (countBadge) countBadge.textContent = `${tickets.length} ${tickets.length === 1 ? 'incidencia' : 'incidencias'}`;
+        const description = document.getElementById('reportMonthDescription');
+        if (description) description.textContent = `Tickets registrados en ${reportMonthLabel(monthKey)}.`;
+
+        if (!tickets.length) {
+            const row = body.insertRow();
+            const cell = row.insertCell();
+            cell.colSpan = 7;
+            cell.className = 'report-empty-cell';
+            cell.textContent = 'No hay incidencias registradas en este mes.';
+            return;
+        }
+
+        tickets.forEach(ticket => {
+            const row = body.insertRow();
+            const createdAt = new Date(ticket.fecha_creacion);
+            const dateLabel = Number.isFinite(createdAt.getTime())
+                ? createdAt.toLocaleDateString('es-PE', {
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric',
+                    timeZone: 'America/Lima'
+                })
+                : '—';
+            [
+                `#${ticket.id} · ${ticket.titulo || 'Sin asunto'}`,
+                ticket.solicitante_nombre || ticket.username || '—',
+                ticket.categoria_usuario || ticket.categoria_nombre || 'Sin categoría',
+                ticket.prioridad || '—',
+                ticket.estado || '—',
+                dateLabel
+            ].forEach(value => {
+                row.insertCell().textContent = value;
+            });
+            const actionCell = row.insertCell();
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'btn-small report-open-ticket';
+            if (ticket.reportAccountId) {
+                button.dataset.reportAccountId = ticket.reportAccountId;
+            } else {
+                button.dataset.reportTicketId = ticket.id;
+            }
+            button.textContent = 'Abrir';
+            button.setAttribute('aria-label', `Abrir ticket ${ticket.id}`);
+            actionCell.appendChild(button);
+        });
+    }
+
+    function renderMonthlyReport() {
+        if (!reportMonthSelect) return;
+        const monthKey = reportMonthSelect.value || currentReportMonth();
+        const tickets = getReportTickets();
+        const closed = tickets.filter(isClosedReportTicket);
+        const resolutionRate = tickets.length ? Math.round(closed.length * 100 / tickets.length) : 0;
+
+        document.getElementById('rep-kpi-total').textContent = String(tickets.length);
+        document.getElementById('rep-kpi-total-note').textContent = `Incluye tickets y cuentas · ${reportMonthLabel(monthKey)}`;
+        document.getElementById('rep-kpi-resueltos').textContent = String(closed.length);
+        document.getElementById('rep-kpi-resueltos-note').textContent = `${resolutionRate}% de las registradas`;
+        document.getElementById('rep-kpi-abiertos').textContent = String(tickets.length - closed.length);
+        document.getElementById('rep-kpi-tiempo').textContent =
+            formatReportDuration(reportMeanElapsedHours(closed, 'sla_resolved_at'));
+        document.getElementById('rep-kpi-primera-atencion').textContent =
+            formatReportDuration(reportMeanElapsedHours(tickets.filter(ticket => ticket.sla_first_response_at), 'sla_first_response_at'));
+        renderReportBars('repCategoriasList', aggregateReportTickets(tickets, 'categoria_reporte', 'Sin categoría'), true);
+        renderReportBars('repOficinasList', aggregateReportTickets(tickets, 'oficina_nombre', 'Sin oficina'));
+        renderReportBars('repTecnicosList', aggregateReportTickets(tickets, 'tecnico', 'Sin asignar'));
+        renderReportDetails(tickets, monthKey);
+    }
+
+    const summaryMonthSelect = document.getElementById('summaryMonthSelect');
+
+    function getSummaryOpenCases() {
+        const tickets = (window.allTickets || [])
+            .filter(ticket => !isClosedReportTicket(ticket))
+            .map(ticket => ({ ...ticket, summaryType: 'ticket' }));
+        const accounts = accountIncidences
+            .filter(incident => incident.estado !== 'RESUELTO')
+            .map(incident => ({
+                ...incident,
+                id: incident.id,
+                titulo: `${incident.tipo_problema || 'Solicitud de acceso'} · ${incident.plataforma || 'Cuenta institucional'}`,
+                solicitante_nombre: [incident.nombres, incident.apellidos].filter(Boolean).join(' '),
+                categoria_nombre: 'Cuentas institucionales',
+                estado: incident.estado === 'ESCALADO_ABANCAY' ? 'Escalado a Abancay' : incident.estado || 'Nuevo',
+                prioridad: incident.prioridad || 'MEDIA',
+                summaryType: 'account'
+            }));
+        const priorityOrder = { URGENTE: 0, CRITICA: 0, CRÍTICA: 0, ALTA: 1, MEDIA: 2, BAJA: 3 };
+        return [...tickets, ...accounts].sort((left, right) => {
+            const priorityDifference = (priorityOrder[String(left.prioridad).toUpperCase()] ?? 4) -
+                (priorityOrder[String(right.prioridad).toUpperCase()] ?? 4);
+            if (priorityDifference) return priorityDifference;
+            return new Date(right.fecha_creacion || 0) - new Date(left.fecha_creacion || 0);
+        });
+    }
+
+    function renderSummaryOpenCases() {
+        const container = document.getElementById('summaryOpenCasesList');
+        const allCount = document.getElementById('summaryOpenAllCount');
+        if (!container) return;
+        const openCases = getSummaryOpenCases();
+        if (allCount) allCount.textContent = String(openCases.length);
+        container.replaceChildren();
+        if (!openCases.length) {
+            const empty = document.createElement('p');
+            empty.className = 'text-muted';
+            empty.textContent = 'No hay casos abiertos por atender.';
+            container.appendChild(empty);
+            return;
+        }
+
+        openCases.slice(0, 6).forEach(item => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'summary-open-case';
+            button.dataset.summaryCaseType = item.summaryType;
+            button.dataset.summaryCaseId = item.id;
+
+            const details = document.createElement('span');
+            details.className = 'summary-open-case-details';
+            const title = document.createElement('strong');
+            title.textContent = item.summaryType === 'account' ? `Cuenta #${item.id} · ${item.titulo}` : `Ticket #${item.id} · ${item.titulo || 'Sin asunto'}`;
+            const metadata = document.createElement('small');
+            metadata.textContent = `${item.solicitante_nombre || item.username || 'Solicitante'} · ${item.categoria_nombre || 'Sin categoría'}`;
+            details.append(title, metadata);
+
+            const badges = document.createElement('span');
+            badges.className = 'summary-open-case-badges';
+            const priority = document.createElement('span');
+            priority.className = `summary-priority summary-priority-${String(item.prioridad).toLowerCase()}`;
+            priority.textContent = item.prioridad || 'MEDIA';
+            const status = document.createElement('span');
+            status.className = 'summary-case-status';
+            status.textContent = item.estado || 'Nuevo';
+            badges.append(priority, status);
+            button.append(details, badges);
+            container.appendChild(button);
+        });
+    }
+
+    function renderSupportSummary() {
+        if (!summaryMonthSelect) return;
+        const monthKey = summaryMonthSelect.value || currentReportMonth();
+        const tickets = getReportTicketsForMonth(monthKey);
+        const closed = tickets.filter(isClosedReportTicket);
+        const open = tickets.length - closed.length;
+        const rate = tickets.length ? Math.round(closed.length * 100 / tickets.length) : 0;
+        const duration = reportMeanElapsedHours(closed, 'sla_resolved_at');
+        const firstResponse = reportMeanElapsedHours(
+            tickets.filter(ticket => ticket.sla_first_response_at),
+            'sla_first_response_at'
+        );
+
+        document.getElementById('summaryTotal').textContent = String(tickets.length);
+        document.getElementById('summaryResolved').textContent = String(closed.length);
+        document.getElementById('summaryResolvedRate').textContent = `${rate}% de las incidencias del mes`;
+        document.getElementById('summaryOpen').textContent = String(open);
+        document.getElementById('summaryResolutionTime').textContent = formatReportDuration(duration);
+        document.getElementById('supportProgressRate').textContent = `${rate}%`;
+        document.getElementById('supportProgressResolved').textContent = String(closed.length);
+        document.getElementById('supportProgressOpen').textContent = String(open);
+        const ring = document.getElementById('supportProgressRing');
+        ring.style.setProperty('--progress', `${rate}%`);
+        ring.setAttribute('aria-label', `${rate}% de incidencias resueltas`);
+        document.getElementById('supportFirstResponse').textContent =
+            `Tiempo medio de primera atención: ${formatReportDuration(firstResponse)}.`;
+        document.getElementById('frequentFailuresCaption').textContent =
+            `Incidencias por categoría · ${reportMonthLabel(monthKey)}`;
+        document.getElementById('frequentFailuresTotal').textContent =
+            `${tickets.length} ${tickets.length === 1 ? 'caso' : 'casos'}`;
+
+        const iconForCategory = label => {
+            const normalized = String(label)
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .toLowerCase();
+            if (/internet|wifi|red/.test(normalized)) return 'ph-wifi-high';
+            if (/cuenta|acceso|correo/.test(normalized)) return 'ph-file-text';
+            if (/pagina|web|sitio/.test(normalized)) return 'ph-globe';
+            if (/fotocopiadora/.test(normalized)) return 'ph-copy';
+            if (/impresora/.test(normalized)) return 'ph-printer';
+            if (/proyector|ecran|multimedia|pantalla/.test(normalized)) return 'ph-presentation';
+            if (/matricula|constancia|acta|nota|expediente|tramite/.test(normalized)) return 'ph-file-text';
+            if (/classroom|class room|aula|plataforma virtual/.test(normalized)) return 'ph-graduation-cap';
+            if (/erp|university|sistema academico|sistema de gestion/.test(normalized)) return 'ph-file-text';
+            if (/\bpcs?\b|computadora|computo|laboratorio|hardware/.test(normalized)) return 'ph-desktop';
+            if (/biblioteca|libro/.test(normalized)) return 'ph-books';
+            if (/auditorio|audio|parlante/.test(normalized)) return 'ph-speaker-high';
+            if (/asistencia|marcador|biometr/.test(normalized)) return 'ph-fingerprint';
+            if (/sin categoria|sin clasificar/.test(normalized)) return 'ph-question';
+            return 'ph-tag';
+        };
+        const failures = document.getElementById('frequentFailuresList');
+        failures.replaceChildren();
+        const categories = aggregateReportTickets(tickets, 'categoria_reporte', 'Sin categoría');
+        if (!categories.length) {
+            const empty = document.createElement('p');
+            empty.className = 'text-muted';
+            empty.textContent = 'No hay incidencias registradas en este periodo.';
+            failures.appendChild(empty);
+        } else {
+            const max = categories[0].count;
+            categories.forEach(({ label, count }) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'frequent-failure-row';
+                button.dataset.summaryCategory = label;
+                const icon = document.createElement('i');
+                icon.className = `ph ${iconForCategory(label)}`;
+                icon.setAttribute('aria-hidden', 'true');
+                const name = document.createElement('span');
+                name.className = 'frequent-failure-name';
+                name.append(icon, document.createTextNode(label));
+                const track = document.createElement('span');
+                track.className = 'frequent-failure-track';
+                const fill = document.createElement('span');
+                fill.className = 'frequent-failure-fill';
+                fill.style.width = `${Math.max(12, Math.round(count * 100 / max))}%`;
+                track.appendChild(fill);
+                const total = document.createElement('strong');
+                total.className = 'frequent-failure-count';
+                total.textContent = String(count);
+                button.setAttribute('aria-label', `Ver ${count} incidencias de ${label}`);
+                button.append(name, track, total);
+                failures.appendChild(button);
+            });
+        }
+        renderSummaryOpenCases();
+    }
+
+    function getReportTicketsForMonth(monthKey) {
+        const selectedMonth = reportMonthSelect?.value;
+        if (reportMonthSelect && selectedMonth !== monthKey) {
+            const originalMonth = selectedMonth;
+            reportMonthSelect.value = monthKey;
+            const tickets = getReportTickets();
+            reportMonthSelect.value = originalMonth;
+            return tickets;
+        }
+        return getReportTickets();
+    }
+
+    summaryMonthSelect?.addEventListener('change', () => {
+        if (reportMonthSelect) reportMonthSelect.value = summaryMonthSelect.value;
+        renderSupportSummary();
+        renderMonthlyReport();
+    });
+
+    cargarMetricasReportes = function() {
+        prepareReportMonths();
+        if (summaryMonthSelect) {
+            const options = [...reportMonthSelect.options].map(option =>
+                new Option(option.textContent, option.value)
+            );
+            summaryMonthSelect.replaceChildren(...options);
+            summaryMonthSelect.value = reportMonthSelect.value;
+        }
+        renderMonthlyReport();
+        renderSupportSummary();
+    };
+    reportMonthSelect?.addEventListener('change', () => {
+        if (summaryMonthSelect) summaryMonthSelect.value = reportMonthSelect.value;
+        renderMonthlyReport();
+        renderSupportSummary();
+    });
+
+    document.getElementById('repCategoriasList')?.addEventListener('click', event => {
+        const categoryButton = event.target.closest('[data-report-category]');
+        const searchInput = document.getElementById('searchInput');
+        if (!categoryButton || !searchInput) return;
+        if (categoryButton.dataset.reportCategory === 'Cuentas institucionales') {
+            window.cambiarVista('tickets');
+            document.getElementById('accountIncidentsList')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            return;
+        }
+        searchInput.value = categoryButton.dataset.reportCategory;
+        searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    document.getElementById('reportTicketsBody')?.addEventListener('click', event => {
+        const button = event.target.closest('[data-report-ticket-id]');
+        if (button) {
+            const ticket = (window.allTickets || []).find(item => Number(item.id) === Number(button.dataset.reportTicketId));
+            if (ticket) window.mostrarDetalleTicket(ticket);
+            return;
+        }
+        const accountButton = event.target.closest('[data-report-account-id]');
+        if (accountButton) mostrarDetalleIncidenciaCuenta(accountButton.dataset.reportAccountId);
+    });
+
+    document.getElementById('frequentFailuresList')?.addEventListener('click', event => {
+        const button = event.target.closest('[data-summary-category]');
+        if (!button) return;
+        const category = button.dataset.summaryCategory;
+        if (category === 'Cuentas institucionales') {
+            window.cambiarVista('tickets');
+            document.getElementById('accountIncidentsList')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            return;
+        }
+        const searchInput = document.getElementById('searchInput');
+        if (!searchInput) return;
+        window.cambiarVista('tickets');
+        searchInput.value = category;
+        searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    document.getElementById('summaryOpenCasesList')?.addEventListener('click', event => {
+        const button = event.target.closest('[data-summary-case-id]');
+        if (!button) return;
+        if (button.dataset.summaryCaseType === 'account') {
+            mostrarDetalleIncidenciaCuenta(button.dataset.summaryCaseId);
+            return;
+        }
+        const ticket = (window.allTickets || []).find(item => Number(item.id) === Number(button.dataset.summaryCaseId));
+        if (ticket) window.mostrarDetalleTicket(ticket);
+    });
+
+    document.getElementById('summaryViewAllCases')?.addEventListener('click', () => {
+        window.cambiarVista('tickets');
+        const activeFilter = [...document.querySelectorAll('.filter-btn')]
+            .find(button => button.getAttribute('onclick')?.includes("filtrar('activos'"));
+        window.filtrar('activos', { currentTarget: activeFilter });
+    });
+
+    function reportCsvCell(value) {
+        return `"${String(value ?? '').replace(/"/g, '""')}"`;
+    }
+
+    window.exportarTicketsExcel = function() {
+        const monthKey = reportMonthSelect?.value || currentReportMonth();
+        const tickets = getReportTickets();
+        if (!tickets.length) {
+            mostrarMensaje('No hay tickets registrados en el mes seleccionado', 'error');
+            return;
+        }
+        const closed = tickets.filter(isClosedReportTicket);
+        const rows = [
+            ['Reporte mensual de soporte UTEA', reportMonthLabel(monthKey)],
+            ['Incidencias registradas', tickets.length],
+            ['Casos resueltos', closed.length],
+            ['Casos abiertos', tickets.length - closed.length],
+            ['Tasa de resolución', `${Math.round(closed.length * 100 / tickets.length)}%`],
+            [],
+            ['ID', 'Asunto', 'Solicitante', 'Oficina', 'Categoría', 'Técnico', 'Prioridad', 'Estado', 'Fecha de registro'],
+            ...tickets.map(ticket => [
+                ticket.id, ticket.titulo, ticket.solicitante_nombre || ticket.username,
+                ticket.oficina_nombre, ticket.categoria_nombre, ticket.tecnico,
+                ticket.prioridad, ticket.estado, ticket.fecha_creacion
+            ])
+        ];
+        const csv = `\uFEFF${rows.map(row => row.map(reportCsvCell).join(',')).join('\r\n')}`;
+        const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `Reporte_UTEA_${monthKey}.csv`;
+        link.click();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
+
+    window.generarReportePDFMensual = function() {
+        const monthKey = reportMonthSelect?.value || currentReportMonth();
+        const tickets = getReportTickets();
+        const printWindow = window.open('', '_blank');
+        if (!printWindow) {
+            mostrarMensaje('Permite las ventanas emergentes para generar el reporte PDF', 'error');
+            return;
+        }
+        const closed = tickets.filter(isClosedReportTicket);
+        const ticketRows = tickets.map(ticket => `
+            <tr>
+                <td>#${escapeHTML(ticket.id)}</td>
+                <td>${escapeHTML(ticket.solicitante_nombre || ticket.username || '—')}</td>
+                <td>${escapeHTML(ticket.categoria_nombre || 'Sin categoría')}</td>
+                <td>${escapeHTML(ticket.titulo || 'Sin asunto')}</td>
+                <td>${escapeHTML(ticket.prioridad || '—')}</td>
+                <td>${escapeHTML(ticket.estado || '—')}</td>
+                <td>${escapeHTML(ticket.fecha_creacion ? new Date(ticket.fecha_creacion).toLocaleDateString('es-PE', { timeZone: 'America/Lima' }) : '—')}</td>
+            </tr>
+        `).join('');
+        printWindow.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8">
+            <title>Reporte UTEA ${escapeHTML(reportMonthLabel(monthKey))}</title>
+            <style>
+                body{font-family:Arial,sans-serif;margin:32px;color:#1e293b}
+                header{text-align:center;border-bottom:3px solid #0b3f8a;padding-bottom:16px;margin-bottom:24px}
+                h1{color:#0b3f8a;font-size:22px;margin:0}header p{color:#475569;margin:8px 0 0}
+                .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:20px 0}
+                .kpi{padding:14px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc}
+                .kpi span{display:block;color:#475569;font-size:12px}.kpi strong{display:block;color:#0b3f8a;font-size:22px;margin-top:6px}
+                table{width:100%;border-collapse:collapse;font-size:11px;margin-top:16px}
+                th,td{border:1px solid #cbd5e1;padding:7px;text-align:left}th{background:#f1f5f9}
+            </style></head><body>
+            <header><h1>Universidad Tecnológica de los Andes</h1>
+            <p>Reporte mensual de soporte · Sede Andahuaylas · ${escapeHTML(reportMonthLabel(monthKey))}</p></header>
+            <div class="kpis">
+                <div class="kpi"><span>Incidencias del mes</span><strong>${tickets.length}</strong></div>
+                <div class="kpi"><span>Casos resueltos</span><strong>${closed.length}</strong></div>
+                <div class="kpi"><span>Casos abiertos</span><strong>${tickets.length - closed.length}</strong></div>
+                <div class="kpi"><span>Tasa de resolución</span><strong>${tickets.length ? Math.round(closed.length * 100 / tickets.length) : 0}%</strong></div>
+            </div>
+            <h2>Detalle de incidencias</h2>
+            <table><thead><tr><th>ID</th><th>Solicitante</th><th>Categoría</th><th>Asunto</th><th>Prioridad</th><th>Estado</th><th>Registro</th></tr></thead>
+            <tbody>${ticketRows || '<tr><td colspan="7">No hay incidencias registradas en este periodo.</td></tr>'}</tbody></table>
+            <script>window.onload=()=>window.print();</script></body></html>`);
+        printWindow.document.close();
+    };
+
     // Escuchar navegación para actualizar métricas de reportes
     document.querySelectorAll('.sidebar-nav .nav-item').forEach(item => {
         item.addEventListener('click', (e) => {
@@ -2583,6 +3625,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     obtenerTickets();
+    cargarIncidenciasCuentas();
+    if (puedeGestionarCuentas) cargarEstadisticasCuentas();
     cargarTecnicos();
     cargarNotificaciones();
     cargarMetricasReportes();

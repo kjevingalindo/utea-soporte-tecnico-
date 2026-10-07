@@ -10,6 +10,16 @@ const { UTEA_PREGRADO_CARRERAS } = require('../utils/uteaConfig');
 
 const ESTADOS_VALIDOS = ['Creado', 'Clasificado', 'Asignado', 'En proceso', 'Esperando usuario', 'Solucionado', 'Cerrado'];
 const PRIORIDADES_VALIDAS = ['Baja', 'Media', 'Alta', 'Urgente', 'Critica'];
+const CATEGORIAS_USUARIO_VALIDAS = [
+    'Internet',
+    'Cuentas institucionales',
+    'Páginas web',
+    'PC',
+    'Impresoras',
+    'Fotocopiadoras',
+    'Classroom',
+    'ERP University'
+];
 const AMBIENTES_POR_BLOQUE = {
     'Bloque A': [
         'Salones / Aulas',
@@ -34,7 +44,8 @@ const AMBIENTES_POR_BLOQUE = {
         'Salones / Aulas',
         'Biblioteca',
         'Laboratorio de Ingeniería Civil'
-    ]
+    ],
+    'Bloque de Asistencia': ['Asistencia']
 };
 
 function esFechaProgramadaValida(value) {
@@ -73,7 +84,7 @@ function calcularPrioridad(impacto, urgencia, prioridadActual) {
 // Crear ticket (admin y usuario) - se asigna automáticamente al jefe
 router.post('/', verificarToken, (req, res) => {
     const {
-        titulo, descripcion, prioridad, tecnico_id, oficina_id, categoria_id, carrera, bloque, ambiente, ubicacion,
+        titulo, descripcion, prioridad, tecnico_id, oficina_id, categoria_id, categoria_usuario, carrera, bloque, ambiente, ubicacion,
         solicitante_nombre, codigo_universitario_dni, tipo_solicitante, asignatura_area, aula,
         impacto, urgencia
     } = req.body || {};
@@ -89,6 +100,10 @@ router.post('/', verificarToken, (req, res) => {
     const prioridadFinal = calcularPrioridad(impacto, urgencia, prioridad);
     if (!PRIORIDADES_VALIDAS.includes(prioridadFinal)) {
         return res.status(400).json({ error: 'La prioridad no es valida' });
+    }
+    if (categoria_usuario !== undefined && categoria_usuario !== null &&
+        !CATEGORIAS_USUARIO_VALIDAS.includes(categoria_usuario)) {
+        return res.status(400).json({ error: 'La categoria de soporte seleccionada no es valida' });
     }
 
     const tieneOficina = oficina_id !== undefined && oficina_id !== null && oficina_id !== '';
@@ -181,15 +196,16 @@ router.post('/', verificarToken, (req, res) => {
         const estadoInicial = 'Creado';
         const slaDeadlines = calculateSlaDeadlines(Date.now(), prioridadFinal);
         const sql = `INSERT INTO tickets
-            (titulo, descripcion, estado, prioridad, tecnico_id, user_id, oficina_id, categoria_id, carrera, bloque, ambiente, aula, asignatura_area,
+            (titulo, descripcion, estado, prioridad, tecnico_id, user_id, oficina_id, categoria_id, categoria_usuario, carrera, bloque, ambiente, aula, asignatura_area,
              ubicacion, solicitante_nombre, codigo_universitario_dni, tipo_solicitante, impacto, urgencia,
              sla_response_due_at, sla_resolution_due_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) `;
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) `;
 
         db.query(sql, [
             titulo.trim(), descripcion || null, estadoInicial, prioridadFinal, jefeId, req.user.id,
             tieneOficina ? Number(oficina_id) : null,
             tieneCategoria ? Number(categoria_id) : null,
+            categoria_usuario || null,
             carreraNormalizada || null,
             bloqueNormalizado,
             ambienteNormalizado,
@@ -294,9 +310,9 @@ router.get('/', verificarToken, (req, res) => {
     }
 
     if (busqueda && typeof busqueda === 'string' && busqueda.trim()) {
-        whereClauses.push('(tickets.titulo LIKE ? OR tickets.solicitante_nombre LIKE ? OR tickets.descripcion LIKE ? OR usuarios.username LIKE ?)');
+        whereClauses.push('(tickets.titulo LIKE ? OR tickets.solicitante_nombre LIKE ? OR tickets.descripcion LIKE ? OR usuarios.username LIKE ? OR tickets.categoria_usuario LIKE ? OR categorias.nombre LIKE ?)');
         const searchPattern = `%${busqueda.trim()}%`;
-        params.push(searchPattern, searchPattern, searchPattern, searchPattern);
+        params.push(searchPattern, searchPattern, searchPattern, searchPattern, searchPattern, searchPattern);
     }
 
     const whereSql = whereClauses.length ? ' WHERE ' + whereClauses.join(' AND ') : '';

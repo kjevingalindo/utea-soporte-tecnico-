@@ -6,9 +6,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Help Desk - Tickets</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="https://unpkg.com/@phosphor-icons/web"></script>
-    <script>window.tailwind = window.tailwind || {}; window.tailwind.config = { corePlugins: { preflight: false } };</script>
+    <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+    <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/bold/style.css">
+    <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css">
+    <script>window.tailwind = window.tailwind || {}; window.tailwind.config = { darkMode: 'class', corePlugins: { preflight: false } };</script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
     <link rel="stylesheet" href="style.css">
 </head>
 
@@ -30,6 +33,10 @@
                 <a href="#" class="nav-item" data-view="tickets">
                     <i class="ph ph-kanban"></i>
                     <span>Tickets</span>
+                </a>
+                <a href="#" class="nav-item" data-view="reportes">
+                    <i class="ph ph-chart-line-up"></i>
+                    <span>Reporte mensual</span>
                 </a>
                 <a href="#" class="nav-item" data-view="admin">
                     <i class="ph ph-shield-check"></i>
@@ -113,6 +120,7 @@
                                 <p id="kpi-total">0</p>
                             </div>
                         </div>
+
                         <div class="kpi-card">
                             <div class="kpi-icon" style="background:#fef3c7; color:#d97706;"><i class="ph-fill ph-clock"></i></div>
                             <div class="kpi-data">
@@ -135,6 +143,122 @@
                             </div>
                         </div>
                     </div>
+
+                    <section class="support-summary" aria-labelledby="supportSummaryTitle">
+                        <div class="support-summary-heading">
+                            <div>
+                                <span class="support-summary-eyebrow">UTEA · ANDAHUAYLAS</span>
+                                <h2 id="supportSummaryTitle">Resumen de soporte</h2>
+                                <p>Incidencias registradas y avance de atención del periodo.</p>
+                            </div>
+                            <div class="summary-period-control">
+                                <label for="summaryMonthSelect">Mes del resumen</label>
+                                <select id="summaryMonthSelect" class="modal-input" aria-label="Mes del resumen"></select>
+                            </div>
+                        </div>
+                        <div class="summary-kpis">
+                            <article class="summary-kpi-card">
+                                <span><i class="ph ph-ticket"></i> Incidencias del mes</span>
+                                <strong id="summaryTotal">0</strong>
+                                <small>Tickets y cuentas institucionales</small>
+                            </article>
+                            <article class="summary-kpi-card">
+                                <span><i class="ph ph-check-circle"></i> Casos resueltos</span>
+                                <strong id="summaryResolved">0</strong>
+                                <small id="summaryResolvedRate">0% del periodo</small>
+                            </article>
+                            <article class="summary-kpi-card">
+                                <span><i class="ph ph-inbox"></i> Casos por atender</span>
+                                <strong id="summaryOpen">0</strong>
+                                <small>Pendientes o en atención</small>
+                            </article>
+                            <article class="summary-kpi-card">
+                                <span><i class="ph ph-clock"></i> Tiempo medio de resolución</span>
+                                <strong id="summaryResolutionTime">Sin datos</strong>
+                                <small>Solo cierres con marca de tiempo disponible</small>
+                            </article>
+                        </div>
+                        <div class="support-summary-grid grid grid-cols-12 gap-6">
+                            <section class="widget-card summary-open-cases min-w-0 overflow-hidden lg:col-span-3" aria-labelledby="summaryOpenCasesTitle">
+                                <div class="widget-header">
+                                    <div>
+                                        <h3 id="summaryOpenCasesTitle">Por atender</h3>
+                                        <p class="text-muted">Casos abiertos de todos los periodos, priorizados para seguimiento.</p>
+                                    </div>
+                                    <button type="button" class="btn-small" id="summaryViewAllCases">
+                                        Ver todas <span id="summaryOpenAllCount">0</span>
+                                    </button>
+                                </div>
+                                <div id="summaryOpenCasesList" class="summary-open-cases-list" aria-live="polite">
+                                    <p class="text-muted">Cargando casos abiertos...</p>
+                                </div>
+                            </section>
+                            <section class="widget-card frequent-failures-card min-w-0 overflow-hidden lg:col-span-5" aria-labelledby="frequentFailuresTitle">
+                                <div class="widget-header">
+                                    <div>
+                                        <h3 id="frequentFailuresTitle">Fallas más frecuentes</h3>
+                                        <p id="frequentFailuresCaption" class="text-muted">Incidencias por categoría del periodo.</p>
+                                    </div>
+                                    <span id="frequentFailuresTotal" class="report-count-badge">0 casos</span>
+                                </div>
+                                <div id="frequentFailuresList" class="frequent-failures-list" aria-live="polite">
+                                    <p class="text-muted">Cargando resumen...</p>
+                                </div>
+                            </section>
+                            <aside class="widget-card support-progress-card min-w-0 overflow-hidden lg:col-span-4" aria-labelledby="supportProgressTitle">
+                                <h3 id="supportProgressTitle"><i class="ph ph-checks"></i> Avance de atención</h3>
+                                <div class="support-progress-ring" id="supportProgressRing" role="img" aria-label="0% de incidencias resueltas">
+                                    <div>
+                                        <strong id="supportProgressRate">0%</strong>
+                                        <span>resuelto</span>
+                                    </div>
+                                </div>
+                                <div class="support-progress-counts">
+                                    <div><span>Resueltos</span><strong id="supportProgressResolved">0</strong></div>
+                                    <div><span>Por atender</span><strong id="supportProgressOpen">0</strong></div>
+                                </div>
+                                <p id="supportFirstResponse">Tiempo de primera atención: sin datos.</p>
+                            </aside>
+                        </div>
+                    </section>
+
+                    <section id="accountStatsSection" class="account-dashboard-section" hidden>
+                        <div class="widget-header">
+                            <div>
+                                <h3>Soporte de cuentas institucionales</h3>
+                                <p class="text-muted">Resumen y plataformas con más incidencias durante este mes.</p>
+                            </div>
+                        </div>
+                        <div class="kpi-grid account-kpi-grid">
+                            <div class="kpi-card">
+                                <div class="kpi-icon" style="background:#e0e7ff; color:#4338ca;"><i class="ph-fill ph-identification-card"></i></div>
+                                <div class="kpi-data"><h3>Total Cuentas</h3><p id="accountKpiTotal">0</p></div>
+                            </div>
+                            <div class="kpi-card">
+                                <div class="kpi-icon" style="background:#dcfce7; color:#16a34a;"><i class="ph-fill ph-check-circle"></i></div>
+                                <div class="kpi-data"><h3>Resueltos localmente</h3><p id="accountKpiLocal">0%</p></div>
+                            </div>
+                            <div class="kpi-card">
+                                <div class="kpi-icon" style="background:#f3e8ff; color:#9333ea;"><i class="ph-fill ph-arrow-fat-up"></i></div>
+                                <div class="kpi-data"><h3>Escalados a Abancay</h3><p id="accountKpiEscalated">0%</p></div>
+                            </div>
+                        </div>
+                        <div class="widget-card account-chart-card">
+                            <div class="widget-header"><h3>Resultado de atención</h3></div>
+                            <div class="account-resolution-chart-container">
+                                <canvas id="accountResolutionChart" role="img" aria-label="Porcentaje de cuentas resueltas localmente y escaladas a Abancay"></canvas>
+                            </div>
+                            <div id="accountChartFallback" class="account-chart-fallback" hidden aria-live="polite"></div>
+                            <p id="accountResolutionChartMessage" class="text-muted" aria-live="polite"></p>
+                        </div>
+                        <div class="widget-card account-chart-card">
+                            <div class="widget-header"><h3>Plataformas más afectadas este mes</h3></div>
+                            <div class="account-chart-container">
+                                <canvas id="accountPlatformsChart" role="img" aria-label="Incidencias de cuentas por plataforma este mes"></canvas>
+                            </div>
+                            <p id="accountChartMessage" class="text-muted" aria-live="polite"></p>
+                        </div>
+                    </section>
                     
                     <div class="dashboard-widgets">
                         <!-- Widget Calendario -->
@@ -183,6 +307,12 @@
                             </div>
                         </div>
                     </div>
+                    <section class="widget-card account-recent-card" aria-labelledby="accountRecentTitle">
+                        <div class="widget-header"><h3 id="accountRecentTitle">Cuentas y accesos recientes</h3></div>
+                        <div id="accountRecentIncidents" class="account-incidents-list" aria-live="polite">
+                            <p class="text-muted">Cargando incidencias...</p>
+                        </div>
+                    </section>
                 </section>
 
                 <!-- VIEW: TICKETS -->
@@ -194,6 +324,19 @@
                             <button class="filter-btn" onclick="filtrar('finalizados', event)">Finalizados <span class="count" id="count-finalizados">0</span></button>
                         </div>
                     </div>
+
+                    <section class="widget-card account-incidents-card" aria-labelledby="accountIncidentsTitle">
+                        <div class="widget-header">
+                            <div>
+                                <h3 id="accountIncidentsTitle">Cuentas y accesos institucionales</h3>
+                                <p class="text-muted">Incidencias de plataformas y escalamiento entre sedes.</p>
+                            </div>
+                            <button type="button" class="btn-small" id="refreshAccountIncidents"><i class="ph ph-arrows-clockwise"></i> Actualizar</button>
+                        </div>
+                        <div id="accountIncidentsList" class="account-incidents-list" aria-live="polite">
+                            <p class="text-muted">Cargando incidencias...</p>
+                        </div>
+                    </section>
 
                     <section class="table-container">
                         <div class="table-header">
@@ -512,42 +655,56 @@
                 <section id="view-reportes" class="view-section">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
                         <div>
-                            <h2 style="margin:0; font-size:1.4rem; font-weight:700;">Reportes e Indicadores TI UTEA</h2>
-                            <p style="margin:4px 0 0 0; color:var(--text-secondary); font-size:0.9rem;">Gestión gerencial de incidencias y nivel de servicio de la Sede Andahuaylas</p>
+                            <h2 style="margin:0; font-size:1.4rem; font-weight:700;">Reporte mensual de soporte</h2>
+                            <p style="margin:4px 0 0 0; color:var(--text-secondary); font-size:0.9rem;">Indicadores y casos del periodo seleccionado para la Sede Andahuaylas.</p>
                         </div>
-                        <div style="display:flex; gap:10px;">
+                        <div class="monthly-report-actions">
+                            <label for="reportMonthSelect">Mes del reporte</label>
+                            <select id="reportMonthSelect" class="modal-input" aria-label="Mes del reporte"></select>
                             <button class="btn-primary" onclick="window.generarReportePDFMensual()"><i class="ph ph-file-pdf"></i> Reporte Mensual PDF</button>
-                            <button class="btn-secondary" onclick="window.exportarTicketsExcel()"><i class="ph ph-file-xls"></i> Exportar a Excel (CSV)</button>
+                            <button class="btn-secondary" onclick="window.exportarTicketsExcel()"><i class="ph ph-file-xls"></i> Descargar CSV</button>
                         </div>
                     </div>
 
-                    <div class="kpi-grid" style="margin-bottom:24px;">
+                    <div class="kpi-grid monthly-report-kpis" style="margin-bottom:24px;">
                         <div class="kpi-card">
                             <div class="kpi-icon" style="background:#e0f2fe; color:#0284c7;"><i class="ph-fill ph-ticket"></i></div>
                             <div class="kpi-data">
-                                <h3>Total Mensual</h3>
+                                <h3>Incidencias del mes</h3>
                                 <p id="rep-kpi-total">0</p>
+                                <small id="rep-kpi-total-note">Registradas en el periodo</small>
                             </div>
                         </div>
                         <div class="kpi-card">
                             <div class="kpi-icon" style="background:#dcfce7; color:#16a34a;"><i class="ph-fill ph-check-circle"></i></div>
                             <div class="kpi-data">
-                                <h3>Resueltos</h3>
+                                <h3>Casos resueltos</h3>
                                 <p id="rep-kpi-resueltos">0</p>
+                                <small id="rep-kpi-resueltos-note">0% de los registrados</small>
+                            </div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-icon" style="background:#fef3c7; color:#d97706;"><i class="ph-fill ph-inbox"></i></div>
+                            <div class="kpi-data">
+                                <h3>Casos abiertos</h3>
+                                <p id="rep-kpi-abiertos">0</p>
+                                <small>Pendientes, en atención y en espera</small>
                             </div>
                         </div>
                         <div class="kpi-card">
                             <div class="kpi-icon" style="background:#f3e8ff; color:#9333ea;"><i class="ph-fill ph-clock"></i></div>
                             <div class="kpi-data">
-                                <h3>Tiempo Medio Solución</h3>
-                                <p id="rep-kpi-tiempo">2.4 hrs</p>
+                                <h3>Tiempo medio de solución</h3>
+                                <p id="rep-kpi-tiempo">Sin datos</p>
+                                <small>Desde el registro hasta el cierre</small>
                             </div>
                         </div>
                         <div class="kpi-card">
-                            <div class="kpi-icon" style="background:#fef3c7; color:#d97706;"><i class="ph-fill ph-star"></i></div>
+                            <div class="kpi-icon" style="background:#e0f2fe; color:#0284c7;"><i class="ph-fill ph-timer"></i></div>
                             <div class="kpi-data">
-                                <h3>Satisfacción CSAT</h3>
-                                <p id="rep-kpi-csat">4.8 / 5</p>
+                                <h3>Primera atención</h3>
+                                <p id="rep-kpi-primera-atencion">Sin datos</p>
+                                <small>Promedio desde el registro</small>
                             </div>
                         </div>
                     </div>
@@ -580,6 +737,34 @@
                             </div>
                         </div>
                     </div>
+
+                    <section class="widget-card monthly-report-detail">
+                        <div class="widget-header">
+                            <div>
+                                <h3>Detalle del mes</h3>
+                                <p id="reportMonthDescription" class="text-muted">Tickets registrados en el periodo seleccionado.</p>
+                            </div>
+                            <span id="reportMonthCount" class="report-count-badge">0 incidencias</span>
+                        </div>
+                        <div class="table-container">
+                            <table class="monthly-report-table">
+                                <thead>
+                                    <tr>
+                                        <th>Incidencia</th>
+                                        <th>Solicitante</th>
+                                        <th>Categoría</th>
+                                        <th>Prioridad</th>
+                                        <th>Estado</th>
+                                        <th>Registro</th>
+                                        <th>Abrir</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="reportTicketsBody">
+                                    <tr><td colspan="7" class="report-empty-cell">Selecciona un mes para ver sus incidencias.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
                 </section>
 
                 <!-- VIEW: BASE DE CONOCIMIENTO -->
@@ -678,10 +863,17 @@
 
     <!-- Modals -->
     <div id="quickTicketOverlay" class="modal-overlay" style="display:none;"></div>
-    <section id="quickTicketModal" class="modal-card quick-ticket-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="quickTicketTitle" aria-hidden="true" tabindex="-1">
+    <section id="quickTicketModal" class="modal-card quick-ticket-modal max-h-[85vh] overflow-y-auto p-6" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="quickTicketTitle" aria-hidden="true" tabindex="-1">
         <div class="modal-header">
             <h3 id="quickTicketTitle">Crear Ticket</h3>
             <button type="button" class="close-btn" id="quickTicketClose" aria-label="Cerrar"><i class="ph ph-x"></i></button>
+        </div>
+        <div class="form-group ticket-type-selector">
+            <label for="ticketType">Tipo de ticket</label>
+            <select id="ticketType" class="modal-input">
+                <option value="soporte">Soporte Técnico TI</option>
+                <option value="cuenta">🔐 Cuenta o Acceso Institucional</option>
+            </select>
         </div>
         <form id="formTicket" class="inline-form ticket-create-form grid grid-cols-1 md:grid-cols-2 gap-3">
             <div class="form-group">
@@ -699,6 +891,19 @@
                     <option value="estudiante">Estudiante</option>
                     <option value="docente">Docente</option>
                     <option value="administrativo">Administrativo</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <select id="ticketCategoria" required aria-label="Categoría de soporte">
+                    <option value="">Categoría de soporte...</option>
+                    <option value="Internet">Internet</option>
+                    <option value="Cuentas institucionales">Cuentas institucionales</option>
+                    <option value="Páginas web">Páginas web</option>
+                    <option value="PC">PC</option>
+                    <option value="Impresoras">Impresoras</option>
+                    <option value="Fotocopiadoras">Fotocopiadoras</option>
+                    <option value="Classroom">Classroom</option>
+                    <option value="ERP University">ERP University</option>
                 </select>
             </div>
             <div class="form-group">
@@ -722,6 +927,7 @@
                     <option value="Bloque A">Bloque A</option>
                     <option value="Bloque B">Bloque B</option>
                     <option value="Bloque C">Bloque C</option>
+                    <option value="Bloque de Asistencia">Bloque de Asistencia</option>
                 </select>
             </div>
             <div class="form-group">
@@ -784,6 +990,78 @@
                 <button type="submit" class="btn-primary">Enviar Ticket</button>
             </div>
         </form>
+        <form id="accountTicketForm" class="inline-form ticket-create-form account-ticket-form grid grid-cols-1 md:grid-cols-2 gap-3" hidden>
+            <div class="form-group">
+                <label for="accountPlatform">Plataforma</label>
+                <select id="accountPlatform" name="plataforma_id" required>
+                    <option value="">Cargando plataformas...</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="accountUserType">Tipo de usuario</label>
+                <select id="accountUserType" name="tipo_usuario" required>
+                    <option value="">Selecciona tipo...</option>
+                    <option value="estudiante">Estudiante</option>
+                    <option value="docente">Docente</option>
+                    <option value="administrativo">Admin</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="accountDni">DNI / Código</label>
+                <input id="accountDni" name="dni_codigo" type="text" maxlength="40" autocomplete="off" required>
+            </div>
+            <div class="form-group">
+                <label for="accountNames">Nombres</label>
+                <input id="accountNames" name="nombres" type="text" maxlength="150" autocomplete="given-name" required>
+            </div>
+            <div class="form-group">
+                <label for="accountSurnames">Apellidos</label>
+                <input id="accountSurnames" name="apellidos" type="text" maxlength="150" autocomplete="family-name" required>
+            </div>
+            <div class="form-group">
+                <label for="facultad">Facultad</label>
+                <select id="facultad" name="facultad">
+                    <option value="">Cargando facultades...</option>
+                </select>
+                <small id="accountFacultyPrograms">Selecciona tu facultad.</small>
+            </div>
+            <div class="form-group">
+                <label for="accountEmail">Correo alternativo</label>
+                <input id="accountEmail" name="correo_alternativo" type="email" maxlength="254" autocomplete="email">
+            </div>
+            <div class="form-group">
+                <label for="accountPhone">Teléfono</label>
+                <input id="accountPhone" name="telefono" type="tel" maxlength="30" autocomplete="tel">
+            </div>
+            <div class="form-group">
+                <label for="accountProblemType">Tipo de problema</label>
+                <select id="accountProblemType" name="tipo_problema" required disabled>
+                    <option value="">Selecciona problema...</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="accountPriority">Prioridad</label>
+                <select id="accountPriority" name="prioridad">
+                    <option value="BAJA">Baja</option>
+                    <option value="MEDIA" selected>Media</option>
+                    <option value="ALTA">Alta</option>
+                    <option value="URGENTE">Urgente</option>
+                </select>
+            </div>
+            <div class="form-group form-group-full">
+                <label for="accountDescription">Descripción</label>
+                <textarea id="accountDescription" name="descripcion" maxlength="10000" required></textarea>
+            </div>
+            <div class="form-group form-group-full">
+                <label for="accountEvidence">Evidencia (opcional)</label>
+                <input id="accountEvidence" name="archivo" type="file" accept="image/jpeg,image/png,image/webp,application/pdf">
+                <small>JPG, PNG, WEBP o PDF. Máximo 10 MB. No adjuntes contraseñas ni códigos de recuperación.</small>
+            </div>
+            <div class="form-group form-actions">
+                <button type="button" class="btn-secondary" data-account-cancel>Cancelar</button>
+                <button type="submit" class="btn-primary">Enviar solicitud</button>
+            </div>
+        </form>
     </section>
 
     <div id="agendaModalOverlay" class="modal-overlay" style="display:none;"></div>
@@ -805,6 +1083,24 @@
 
     <div id="ticketDetalle" class="modal-card" style="display:none;"></div>
     <div id="overlay" style="display:none;" class="modal-overlay" onclick="cerrarDetalle()"></div>
+
+    <div id="escalationOverlay" class="modal-overlay" style="display:none;"></div>
+    <section id="escalationModal" class="modal-card account-action-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="escalationTitle" aria-hidden="true" tabindex="-1">
+        <div class="modal-header">
+            <h3 id="escalationTitle">Escalar incidencia a Abancay</h3>
+            <button type="button" class="close-btn" data-close-escalation aria-label="Cerrar"><i class="ph ph-x"></i></button>
+        </div>
+        <form id="escalationForm" class="account-action-form">
+            <label for="escalationArea">Área destino en Abancay</label>
+            <input id="escalationArea" name="area_destino" type="text" maxlength="150" value="Soporte de cuentas institucionales" required>
+            <label for="escalationReason">Motivo del escalamiento</label>
+            <textarea id="escalationReason" name="motivo" maxlength="5000" required></textarea>
+            <div class="modal-actions">
+                <button type="button" class="btn-secondary" data-close-escalation>Cancelar</button>
+                <button type="submit" class="btn-primary">Confirmar escalamiento</button>
+            </div>
+        </form>
+    </section>
     
     <div id="editarTicket" class="modal-card" style="display:none;">
         <h3>Editar Ticket</h3>
@@ -892,6 +1188,7 @@
     <script src="app.js"></script>
     <script src="dashboard.js"></script>
     <script src="authCheck.js"></script>
+    <script type="module" src="js/main.js"></script>
 
 </body>
 </html>
