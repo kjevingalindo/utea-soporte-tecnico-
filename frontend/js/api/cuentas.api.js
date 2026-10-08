@@ -24,12 +24,18 @@
         getIncidencia(incidenciaId) {
             return requestData(`/api/cuentas/incidencias/${encodeURIComponent(incidenciaId)}`);
         },
+        descargarEvidencia(incidenciaId, evidenciaId) {
+            return global.fetchAPI(
+                `/api/cuentas/incidencias/${encodeURIComponent(incidenciaId)}/evidencias/${encodeURIComponent(evidenciaId)}/descargar`
+            );
+        },
         getStats() {
             return requestData('/api/cuentas/stats');
         },
-        crearTicketCuenta(formData) {
+        crearTicketCuenta(formData, idempotencyKey) {
             return requestData('/api/cuentas/incidencias', {
                 method: 'POST',
+                headers: { 'Idempotency-Key': idempotencyKey },
                 body: formData
             });
         },

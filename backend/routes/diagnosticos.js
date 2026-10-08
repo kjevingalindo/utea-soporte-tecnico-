@@ -4,17 +4,8 @@ const db = require('../db');
 const verificarToken = require('../middleware/authMiddleware');
 const { verificarRol } = require('../middleware/roleMiddleware');
 const { registrarHistorial } = require('./historial');
-
-function obtenerAccesoTicket(ticketId, req, res, next) {
-    db.query('SELECT user_id FROM tickets WHERE id = ?', [ticketId], (err, rows) => {
-        if (err) return res.status(500).json({ error: 'No se pudo validar el ticket' });
-        if (!rows.length) return res.status(404).json({ error: 'Ticket no encontrado' });
-        if (req.user.rol !== 'admin' && Number(rows[0].user_id) !== Number(req.user.id)) {
-            return res.status(403).json({ error: 'No tienes permisos para ver este diagnóstico' });
-        }
-        next();
-    });
-}
+const requireTicketAccess = require('../middleware/ticketAccess');
+const { TICKET_ATTACHMENT_ROLES } = require('../utils/accessControl');
 
 // Endpoint público/autenticado para listar auto-diagnósticos de la base de conocimiento UTEA
 router.get('/auto', verificarToken, (req, res) => {
@@ -40,8 +31,7 @@ router.get('/auto/categoria/:codigo', verificarToken, (req, res) => {
     );
 });
 
-router.get('/:ticketId', verificarToken, (req, res) => {
-    obtenerAccesoTicket(req.params.ticketId, req, res, () => {
+router.get('/:ticketId', verificarToken, requireTicketAccess({ roles: TICKET_ATTACHMENT_ROLES }), (req, res) => {
         db.query(
             `SELECT d.*, u.username AS tecnico_nombre
              FROM ticket_diagnosticos d
@@ -53,7 +43,6 @@ router.get('/:ticketId', verificarToken, (req, res) => {
                 res.json(rows[0] || null);
             }
         );
-    });
 });
 
 router.put('/:ticketId', verificarToken, verificarRol('admin'), (req, res) => {

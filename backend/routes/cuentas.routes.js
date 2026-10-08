@@ -6,6 +6,8 @@ const multer = require('multer');
 const verificarToken = require('../middleware/authMiddleware');
 const { verificarRol } = require('../middleware/roleMiddleware');
 const controller = require('../controllers/cuentas.controller');
+const requireIdempotencyKey = require('../middleware/idempotencyKey');
+const { ACCOUNT_STAFF_ROLES } = require('../utils/accessControl');
 
 const router = express.Router();
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -15,7 +17,7 @@ const allowedTypes = new Map([
     ['image/webp', '.webp'],
     ['application/pdf', '.pdf']
 ]);
-const staffRoles = ['admin', 'superadmin', 'tecnico', 'adminti'];
+const staffRoles = [...ACCOUNT_STAFF_ROLES];
 
 fs.mkdirSync(controller.uploadDirectory, { recursive: true });
 
@@ -88,7 +90,7 @@ router.use(verificarToken);
 router.post('/plataformas', verificarRol('admin', 'superadmin'), controller.rechazarCredenciales, controller.crearPlataforma);
 
 router.get('/stats', verificarRol(...staffRoles), controller.obtenerEstadisticas);
-router.post('/incidencias', handleUpload, validateFileSignature, controller.crearIncidencia);
+router.post('/incidencias', requireIdempotencyKey, handleUpload, validateFileSignature, controller.crearIncidencia);
 router.get('/incidencias', controller.listarIncidencias);
 router.get('/incidencias/:id', controller.obtenerIncidencia);
 router.post('/incidencias/:id/escalar', verificarRol(...staffRoles), controller.rechazarCredenciales, controller.escalarIncidencia);
@@ -100,5 +102,6 @@ router.post(
     controller.rechazarCredenciales,
     controller.subirEvidencia
 );
+router.get('/incidencias/:id/evidencias/:evidenceId/descargar', controller.descargarEvidencia);
 
 module.exports = router;

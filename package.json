@@ -7,6 +7,7 @@
     "start": "node backend/server.js",
     "dev": "nodemon backend/server.js",
     "db:migrate": "node scripts/migrate.js",
+    "test:integration": "node --test tests/integration/accounts.integration.test.js tests/integration/ticket-routes.integration.test.js",
     "test": "node --test"
   },
   "keywords": [],

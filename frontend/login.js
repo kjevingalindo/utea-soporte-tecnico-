@@ -38,7 +38,7 @@ loginForm?.addEventListener('submit', async (e) => {
     if (errorDiv) errorDiv.textContent = '';
 
     try {
-        const res = await fetch('http://localhost:3000/api/auth/login', {
+        const res = await fetch('/api/auth/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password })
@@ -50,6 +50,8 @@ loginForm?.addEventListener('submit', async (e) => {
             throw new Error(data.error || 'Error al iniciar sesión');
         }
 
+        localStorage.clear();
+        sessionStorage.clear();
         localStorage.setItem('token', data.token);
         localStorage.setItem('username', data.username);
         localStorage.setItem('rol', data.rol);
@@ -80,7 +82,7 @@ registerForm?.addEventListener('submit', async (e) => {
     }
 
     try {
-        const res = await fetch('http://localhost:3000/api/auth/register', {
+        const res = await fetch('/api/auth/register', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password })

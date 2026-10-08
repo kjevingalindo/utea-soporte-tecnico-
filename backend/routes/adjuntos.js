@@ -7,6 +7,8 @@ const router = express.Router();
 const db = require('../db');
 const verificarToken = require('../middleware/authMiddleware');
 const { registrarHistorial } = require('./historial');
+const requireTicketAccess = require('../middleware/ticketAccess');
+const { TICKET_ATTACHMENT_ROLES } = require('../utils/accessControl');
 
 const uploadDirectory = path.resolve(__dirname, '../uploads/tickets');
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -36,22 +38,6 @@ const upload = multer({
         callback(null, true);
     }
 });
-
-function requireTicketAccess(req, res, next) {
-    const ticketId = Number(req.params.ticketId);
-    if (!Number.isInteger(ticketId) || ticketId < 1) {
-        return res.status(400).json({ error: 'El identificador del ticket no es válido' });
-    }
-
-    db.query('SELECT user_id FROM tickets WHERE id = ?', [ticketId], (err, rows) => {
-        if (err) return res.status(500).json({ error: 'No se pudo validar el ticket' });
-        if (!rows.length) return res.status(404).json({ error: 'Ticket no encontrado' });
-        if (req.user.rol !== 'admin' && Number(rows[0].user_id) !== Number(req.user.id)) {
-            return res.status(403).json({ error: 'No tienes permisos para acceder a este ticket' });
-        }
-        next();
-    });
-}
 
 function handleUpload(req, res, next) {
     upload.single('archivo')(req, res, (err) => {
@@ -94,7 +80,7 @@ async function validateFileSignature(req, res, next) {
     }
 }
 
-router.get('/:ticketId', verificarToken, requireTicketAccess, (req, res) => {
+router.get('/:ticketId', verificarToken, requireTicketAccess({ roles: TICKET_ATTACHMENT_ROLES }), (req, res) => {
     db.query(
         `SELECT id, ticket_id, usuario_id, nombre_original, tipo_mime, tamano_bytes, created_at
          FROM ticket_adjuntos WHERE ticket_id = ? ORDER BY created_at DESC`,
@@ -106,7 +92,7 @@ router.get('/:ticketId', verificarToken, requireTicketAccess, (req, res) => {
     );
 });
 
-router.post('/:ticketId', verificarToken, requireTicketAccess, handleUpload, validateFileSignature, (req, res) => {
+router.post('/:ticketId', verificarToken, requireTicketAccess({ roles: TICKET_ATTACHMENT_ROLES }), handleUpload, validateFileSignature, (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'Selecciona un archivo para adjuntar' });
 
     db.query(
@@ -140,7 +126,7 @@ router.post('/:ticketId', verificarToken, requireTicketAccess, handleUpload, val
     );
 });
 
-router.get('/:ticketId/:adjuntoId/descargar', verificarToken, requireTicketAccess, (req, res) => {
+router.get('/:ticketId/:adjuntoId/descargar', verificarToken, requireTicketAccess({ roles: TICKET_ATTACHMENT_ROLES }), (req, res) => {
     db.query(
         `SELECT nombre_original, nombre_archivo, tipo_mime
          FROM ticket_adjuntos WHERE id = ? AND ticket_id = ?`,

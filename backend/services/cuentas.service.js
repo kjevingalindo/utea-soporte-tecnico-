@@ -1,5 +1,6 @@
 const mysql = require('mysql2/promise');
 const path = require('path');
+const { isAccountStaff } = require('../utils/accessControl');
 
 const pool = mysql.createPool({
     host: process.env.DB_HOST,
@@ -12,13 +13,6 @@ const pool = mysql.createPool({
     queueLimit: 0
 });
 
-const OFFICIAL_PLATFORMS = [
-    'Gmail Institucional',
-    'Google Classroom',
-    'ERP University UTEA',
-    'No cuento con un correo institucional',
-    'Otro'
-];
 const OFFICIAL_FACULTIES = [
     'Facultad de Ingeniería',
     'Facultad de Ciencias Jurídicas, Contables y Sociales',
@@ -50,13 +44,11 @@ async function writeHistory(connection, incidence, userId, action, previousState
 }
 
 async function getPlatforms() {
-    const placeholders = OFFICIAL_PLATFORMS.map(() => '?').join(', ');
     const [rows] = await pool.execute(
         `SELECT id, nombre, descripcion, activo, fecha_creacion
          FROM plataformas
-         WHERE activo = TRUE AND nombre IN (${placeholders})
-         ORDER BY FIELD(nombre, ${placeholders})`,
-        [...OFFICIAL_PLATFORMS, ...OFFICIAL_PLATFORMS]
+         WHERE activo = TRUE
+         ORDER BY nombre`
     );
     return rows;
 }
@@ -82,11 +74,11 @@ async function createPlatform({ nombre, descripcion, activo }) {
 }
 
 async function createIncident(data) {
-    return inTransaction(async connection => {
-        const platformPlaceholders = OFFICIAL_PLATFORMS.map(() => '?').join(', ');
+    try {
+        return await inTransaction(async connection => {
         const [platforms] = await connection.execute(
-            `SELECT id FROM plataformas WHERE id = ? AND activo = TRUE AND nombre IN (${platformPlaceholders})`,
-            [data.plataforma_id, ...OFFICIAL_PLATFORMS]
+            'SELECT id FROM plataformas WHERE id = ? AND activo = TRUE',
+            [data.plataforma_id]
         );
         if (!platforms.length) {
             const err = new Error('La plataforma no existe, está inactiva o no pertenece al catálogo oficial');
@@ -107,10 +99,16 @@ async function createIncident(data) {
         }
 
         if (data.ticket_id !== null) {
-            const [tickets] = await connection.execute('SELECT id FROM tickets WHERE id = ?', [data.ticket_id]);
+            const [tickets] = await connection.execute('SELECT id, user_id FROM tickets WHERE id = ?', [data.ticket_id]);
             if (!tickets.length) {
                 const err = new Error('El ticket relacionado no existe');
                 err.status = 400;
+                throw err;
+            }
+            if (!isAccountStaff({ id: data.usuario_id, rol: data.user_role }) &&
+                Number(tickets[0].user_id) !== Number(data.usuario_id)) {
+                const err = new Error('No tienes permiso para vincular ese ticket');
+                err.status = 403;
                 throw err;
             }
         }
@@ -118,8 +116,9 @@ async function createIncident(data) {
         const [result] = await connection.execute(
             `INSERT INTO incidencias_cuentas
                 (ticket_id, plataforma_id, usuario_id, tipo_usuario, dni_codigo, nombres, apellidos,
-                 correo_alternativo, telefono, facultad, oficina_id, tipo_problema, descripcion, estado, prioridad)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'NUEVO', ?)`,
+                 correo_alternativo, telefono, facultad, oficina_id, tipo_problema, descripcion, estado, prioridad,
+                 idempotency_key, idempotency_hash)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'NUEVO', ?, ?, ?)`,
             [
                 data.ticket_id,
                 data.plataforma_id,
@@ -134,7 +133,9 @@ async function createIncident(data) {
                 data.oficina_id,
                 data.tipo_problema,
                 data.descripcion,
-                data.prioridad
+                data.prioridad,
+                data.idempotency_key,
+                data.idempotency_hash
             ]
         );
         const incidence = { id: result.insertId, ticket_id: data.ticket_id };
@@ -164,7 +165,21 @@ async function createIncident(data) {
             );
         }
         return { id: result.insertId };
-    });
+        });
+    } catch (err) {
+        if (err.code !== 'ER_DUP_ENTRY') throw err;
+        const [rows] = await pool.execute(
+            'SELECT id, idempotency_hash FROM incidencias_cuentas WHERE usuario_id = ? AND idempotency_key = ?',
+            [data.usuario_id, data.idempotency_key]
+        );
+        if (!rows.length) throw err;
+        if (rows[0].idempotency_hash !== data.idempotency_hash) {
+            const conflict = new Error('La clave de reintento ya se usó con datos distintos. Inicia una nueva solicitud.');
+            conflict.status = 409;
+            throw conflict;
+        }
+        return { id: rows[0].id, replayed: true };
+    }
 }
 
 async function listIncidents({ user, staffRoles, filters, values }) {
@@ -178,9 +193,11 @@ async function listIncidents({ user, staffRoles, filters, values }) {
         `SELECT ic.id, ic.ticket_id, ic.plataforma_id, p.nombre AS plataforma,
                 ic.usuario_id, ic.tipo_usuario, ic.dni_codigo, ic.nombres, ic.apellidos,
                 ic.tipo_problema, ic.descripcion, ic.estado, ic.prioridad,
+                o.nombre AS oficina,
                 ic.fecha_creacion, ic.fecha_resolucion
          FROM incidencias_cuentas ic
          INNER JOIN plataformas p ON p.id = ic.plataforma_id
+         LEFT JOIN oficinas o ON o.id = ic.oficina_id
          ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''}
          ORDER BY ic.fecha_creacion DESC`,
         params
@@ -233,6 +250,17 @@ async function getIncident(id) {
         historial: historial[0],
         escalamientos: escalamientos[0]
     };
+}
+
+async function getEvidenceDownload(incidentId, evidenceId) {
+    const [rows] = await pool.execute(
+        `SELECT ic.usuario_id, e.nombre_original, e.nombre_archivo, e.tipo_mime
+         FROM incidencias_cuentas ic
+         INNER JOIN incidencia_cuenta_evidencias e ON e.incidencia_id = ic.id
+         WHERE ic.id = ? AND e.id = ?`,
+        [incidentId, evidenceId]
+    );
+    return rows[0] || null;
 }
 
 async function escalateIncident(id, userId, reason) {
@@ -363,9 +391,9 @@ async function getStats() {
     const total = Number(row.total);
     return {
         total,
-        resueltos_localmente_pct: total ? Number((Number(row.resueltos_localmente) * 100 / total).toFixed(2)) : 0,
-        escalados_abancay_pct: total ? Number((Number(row.escalados_abancay) * 100 / total).toFixed(2)) : 0,
-        tiempo_promedio: row.tiempo_promedio === null ? 0 : Number(Number(row.tiempo_promedio).toFixed(2)),
+        resueltos_localmente_pct: total ? Number((Number(row.resueltos_localmente) * 100 / total).toFixed(2)) : null,
+        escalados_abancay_pct: total ? Number((Number(row.escalados_abancay) * 100 / total).toFixed(2)) : null,
+        tiempo_promedio: row.tiempo_promedio === null ? null : Number(Number(row.tiempo_promedio).toFixed(2)),
         plataformas_mas_afectadas: platforms
     };
 }
@@ -377,8 +405,10 @@ module.exports = {
     createIncident,
     listIncidents,
     getIncident,
+    getEvidenceDownload,
     escalateIncident,
     resolveIncident,
     addEvidence,
-    getStats
+    getStats,
+    close: () => pool.end()
 };

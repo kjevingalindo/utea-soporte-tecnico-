@@ -4,9 +4,11 @@ const db = require('../db');
 const verificarToken = require('../middleware/authMiddleware');
 const { crearNotificacion } = require('./notifications');
 const { registrarHistorial } = require('./historial');
+const requireTicketAccess = require('../middleware/ticketAccess');
+const { TICKET_ATTACHMENT_ROLES } = require('../utils/accessControl');
 
 // Obtener comentarios de un ticket
-router.get('/:ticketId', verificarToken, (req, res) => {
+router.get('/:ticketId', verificarToken, requireTicketAccess({ roles: TICKET_ATTACHMENT_ROLES }), (req, res) => {
     const { ticketId } = req.params;
     
     db.query(`SELECT comentarios.*, usuarios.username 
@@ -14,25 +16,22 @@ router.get('/:ticketId', verificarToken, (req, res) => {
                LEFT JOIN usuarios ON comentarios.user_id = usuarios.id 
                              INNER JOIN tickets ON comentarios.ticket_id = tickets.id
                              WHERE comentarios.ticket_id = ?
-                                 AND (tickets.user_id = ? OR ? = 'admin')
-                             ORDER BY comentarios.fecha ASC`, [ticketId, req.user.id, req.user.rol], (err, results) => {
+                             ORDER BY comentarios.fecha ASC`, [ticketId], (err, results) => {
         if (err) return res.status(500).json(err);
         res.json(results);
     });
 });
 
 // Agregar comentario
-router.post('/', verificarToken, (req, res) => {
+router.post('/', verificarToken, requireTicketAccess({ parameter: 'ticket_id', source: 'body', roles: TICKET_ATTACHMENT_ROLES }), (req, res) => {
     const { ticket_id, comentario } = req.body || {};
     
     if (!ticket_id || typeof comentario !== 'string' || !comentario.trim()) {
         return res.status(400).json({ error: 'Ticket y comentario son obligatorios' });
     }
     
-    db.query(`INSERT INTO comentarios (ticket_id, user_id, comentario)
-              SELECT tickets.id, ?, ? FROM tickets
-              WHERE tickets.id = ? AND (tickets.user_id = ? OR ? = 'admin')`,
-        [req.user.id, comentario, ticket_id, req.user.id, req.user.rol], (err, result) => {
+    db.query('INSERT INTO comentarios (ticket_id, user_id, comentario) VALUES (?, ?, ?)',
+        [ticket_id, req.user.id, comentario.trim()], (err, result) => {
             if (err) return res.status(500).json(err);
             if (result.affectedRows === 0) {
                 return res.status(404).json({ error: 'Ticket no encontrado' });
@@ -61,7 +60,9 @@ router.post('/', verificarToken, (req, res) => {
                                     'nuevo_comentario',
                                     `${req.user.username} comentó en tu ticket "${ticketTitulo}"`,
                                     parseInt(ticket_id)
-                                );
+                                ).catch(notificationError => {
+                                    console.error('No se pudo notificar el comentario:', notificationError.message);
+                                });
                             }
                         } else {
                             db.query("SELECT id FROM usuarios WHERE rol = 'admin'", (err3, admins) => {
@@ -72,7 +73,9 @@ router.post('/', verificarToken, (req, res) => {
                                             'nuevo_comentario',
                                             `${req.user.username} comentó en ticket #${ticket_id}: "${ticketTitulo}"`,
                                             parseInt(ticket_id)
-                                        );
+                                        ).catch(notificationError => {
+                                            console.error('No se pudo notificar el comentario:', notificationError.message);
+                                        });
                                     });
                                 }
                             });
@@ -100,4 +103,3 @@ router.post('/', verificarToken, (req, res) => {
 });
 
 module.exports = router;
-

@@ -15,12 +15,16 @@ function verificarToken(req, res, next) {
 
     jwt.verify(token, SECRET, (err, user) => {
         if (err) {
-            return res.status(403).json({ error: 'Token invalido' });
+            return res.status(401).json({ error: 'Token invalido' });
         }
         
         // Consultar usuario en BD para obtener rol actualizado
         db.query('SELECT id, username, rol FROM usuarios WHERE id = ?', [user.id], (err, results) => {
-            if (err || results.length === 0) {
+            if (err) {
+                console.error('Error validando la sesión del usuario:', err.message);
+                return res.status(500).json({ error: 'Error validando la sesión' });
+            }
+            if (results.length === 0) {
                 return res.status(401).json({ error: 'Usuario no encontrado' });
             }
             

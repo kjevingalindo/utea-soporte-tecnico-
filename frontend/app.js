@@ -1,10 +1,54 @@
-document.addEventListener('DOMContentLoaded', () => {
+if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
+    console.info('Skip legacy app bootstrap; already initialized.');
+} else {
+    window.__UTEA_LEGACY_APP_BOOTSTRAPPED__ = true;
+    document.addEventListener('DOMContentLoaded', async () => {
 
     const token = localStorage.getItem('token');
     if (!token) {
         window.location.replace('/login.html');
         return;
     }
+    window.addEventListener('storage', event => {
+        if (event.key === 'token' && event.newValue !== token) {
+            sessionStorage.clear();
+            window.location.replace('/login.html');
+        }
+    });
+
+    let identidad;
+    try {
+        const identityResponse = await window.fetch('/api/auth/me', {
+            headers: { Authorization: `Bearer ${token}` }
+        });
+        if (identityResponse.status === 401) {
+            localStorage.clear();
+            sessionStorage.clear();
+            window.location.replace('/login.html');
+            return;
+        }
+        if (!identityResponse.ok) {
+            throw new Error('No se pudo validar la identidad de la sesión');
+        }
+        identidad = await identityResponse.json();
+        if (!identidad || !Number.isSafeInteger(Number(identidad.id)) || !identidad.rol) {
+            throw new Error('La identidad validada por el servidor no es válida');
+        }
+    } catch (error) {
+        console.error('No se pudo validar la sesión:', error);
+        window.mostrarMensaje?.(error.message, 'error');
+        return;
+    }
+
+    const previousUserId = localStorage.getItem('utea.session.userId');
+    if (previousUserId && previousUserId !== String(identidad.id)) {
+        localStorage.clear();
+        sessionStorage.clear();
+        localStorage.setItem('token', token);
+    }
+    localStorage.setItem('utea.session.userId', String(identidad.id));
+    localStorage.setItem('username', identidad.username);
+    localStorage.setItem('rol', identidad.rol);
 
     function fetch(url, options = {}) {
         const currentToken = localStorage.getItem('token');
@@ -14,28 +58,85 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         return window.fetchAPI(url, { ...options, allowHttpErrors: true }).then(response => {
-            if (response.status === 401 || response.status === 403) {
+            if (response.status === 401) {
                 localStorage.clear();
+                sessionStorage.clear();
                 window.location.replace('/login.html');
             }
             return response;
         });
     }
 
-    const username = localStorage.getItem('username');
-    const rol = localStorage.getItem('rol');
-    const userRole = localStorage.getItem('userRole') || rol;
-    const userRoleNormalizado = String(userRole || '').toLowerCase();
-    const puedeAsignarTecnico = ['admin', 'superadmin', 'adminti'].includes(userRoleNormalizado);
-    const puedeGestionarCuentas = ['admin', 'superadmin', 'tecnico', 'adminti'].includes(userRoleNormalizado);
+    function pendingIdempotencyKey(name) {
+        const storageKey = `utea.pending.${name}`;
+        let key = sessionStorage.getItem(storageKey);
+        if (!key) {
+            key = crypto.randomUUID();
+            sessionStorage.setItem(storageKey, key);
+        }
+        return key;
+    }
+
+    function clearPendingIdempotencyKey(name) {
+        sessionStorage.removeItem(`utea.pending.${name}`);
+    }
+
+    const username = identidad.username;
+    const rol = String(identidad.rol);
+    const userRoleNormalizado = rol.toLowerCase();
+    if (!window.UTEAAccessControl) {
+        throw new Error('No se pudo inicializar el control de acceso de la interfaz');
+    }
+    const access = window.UTEAAccessControl;
+    const canViewReports = access.canViewReports(identidad);
+    const canViewAdmin = access.canManageAdmin(identidad);
+    const puedeAsignarTecnico = access.canManageAssignments(identidad);
+    const puedeGestionarCuentas = access.canManageAccounts(identidad);
+    const canListAllTickets = access.canListAllTickets(identidad);
+    const canManageCalendar = access.canManageAdmin(identidad);
+    if (canViewReports || puedeGestionarCuentas) {
+        try {
+            await import('./js/reporting.js');
+        } catch (error) {
+            console.error('No se pudieron cargar las utilidades de reportes:', error);
+            window.mostrarMensaje?.('No se pudieron cargar las métricas de soporte.', 'error');
+        }
+    }
+    const reportNav = document.querySelector('.nav-item[data-view="reportes"]');
+    const reportView = document.getElementById('view-reportes');
+    if (reportNav) reportNav.hidden = !canViewReports;
+    if (reportView) reportView.hidden = !canViewReports;
+    const adminNav = document.querySelector('.nav-item[data-view="admin"]');
+    const adminView = document.getElementById('view-admin');
+    if (adminNav) adminNav.hidden = !canViewAdmin;
+    if (adminView) adminView.hidden = !canViewAdmin;
+    const configNav = document.querySelector('.nav-item[data-view="configuracion"]');
+    const configView = document.getElementById('view-configuracion');
+    if (configNav) configNav.hidden = !canViewAdmin;
+    if (configView) configView.hidden = !canViewAdmin;
+    document.querySelectorAll('#view-clientes, #view-plantillas, #view-integraciones, #view-ajustes')
+        .forEach(view => { view.hidden = !canViewAdmin; });
+    const supportSummary = document.getElementById('supportSummarySection');
+    if (supportSummary) supportSummary.hidden = !canListAllTickets;
+    const staffDashboard = document.getElementById('staffDashboardContent');
+    const requesterDashboard = document.getElementById('requesterDashboardContent');
+    if (staffDashboard) staffDashboard.hidden = !canListAllTickets;
+    if (requesterDashboard) requesterDashboard.hidden = canListAllTickets;
+    const profileNav = document.getElementById('profileNav');
+    const profileView = document.getElementById('view-perfil');
+    const canViewOwnProfile = !canListAllTickets;
+    if (profileNav) profileNav.hidden = !canViewOwnProfile;
+    if (profileView) profileView.hidden = !canViewOwnProfile;
+    const ticketsNewRequestButton = document.getElementById('ticketsNewRequestButton');
+    if (ticketsNewRequestButton) ticketsNewRequestButton.hidden = !canViewOwnProfile;
+    const homeNavLabel = document.getElementById('homeNavLabel');
+    if (homeNavLabel) homeNavLabel.textContent = 'Dashboard';
+    const ticketsNavLabel = document.getElementById('ticketsNavLabel');
+    if (ticketsNavLabel) ticketsNavLabel.textContent = canListAllTickets ? 'Tickets' : 'Mis tickets';
+    const quickTicketLabel = document.getElementById('quickTicketLabel');
+    if (quickTicketLabel) quickTicketLabel.textContent = canListAllTickets ? 'Nuevo Ticket' : 'Nueva solicitud';
     const accountStatsSection = document.getElementById('accountStatsSection');
     if (accountStatsSection) accountStatsSection.hidden = !puedeGestionarCuentas;
-    if (rol !== 'admin') {
-        document.querySelector('.nav-item[data-view="admin"]')?.remove();
-        document.getElementById('view-admin')?.remove();
-        document.querySelector('.nav-item[data-view="configuracion"]')?.remove();
-        document.getElementById('view-configuracion')?.remove();
-    }
 
     document.getElementById('usuarioActivo').textContent = username || 'Usuario';
     const avatarEl = document.getElementById('avatarLetra');
@@ -44,8 +145,29 @@ document.addEventListener('DOMContentLoaded', () => {
     // Mostrar badge de rol
     const rolBadge = document.getElementById('rolBadge');
     if (rolBadge) {
-        rolBadge.textContent = rol === 'admin' ? 'Admin' : 'Usuario';
-        rolBadge.classList.add(rol === 'admin' ? 'rol-admin' : 'rol-usuario');
+        const roleLabels = {
+            admin: 'Administrador',
+            superadmin: 'Superadministrador',
+            tecnico: 'Técnico',
+            adminti: 'Administración TI',
+            administrativo: 'Solicitante · Administrativo',
+            docente: 'Solicitante · Docente',
+            estudiante: 'Solicitante · Estudiante',
+            usuario: 'Solicitante'
+        };
+        rolBadge.textContent = roleLabels[userRoleNormalizado] || 'Solicitante';
+        rolBadge.classList.add(canListAllTickets || canViewAdmin ? 'rol-admin' : 'rol-usuario');
+    }
+    window.UTEAIdentity = identidad;
+    window.dispatchEvent(new CustomEvent('utea:identity-ready', { detail: identidad }));
+    if (canListAllTickets) {
+        try {
+            const { initializeDashboardCalendar } = await import('./dashboard.js');
+            initializeDashboardCalendar();
+        } catch (error) {
+            console.error('No se pudo inicializar el calendario administrativo:', error);
+            window.mostrarMensaje?.('No se pudo cargar el calendario administrativo.', 'error');
+        }
     }
     // Mostrar asignación de tecnico solo para admin
     if (puedeAsignarTecnico) {
@@ -228,6 +350,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     window.allTickets = [];
+    let ticketsRequestId = 0;
     let agendaMesActual = new Date();
     let agendaDiaSeleccionado = fechaHoyEnPeru();
 
@@ -332,6 +455,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     window.moverMesAgenda = (offset) => {
+        if (!canManageCalendar) return;
         agendaMesActual = new Date(agendaMesActual.getFullYear(), agendaMesActual.getMonth() + offset, 1);
         renderCalendarioProgramacion();
     };
@@ -342,7 +466,7 @@ document.addEventListener('DOMContentLoaded', () => {
         agendaDiaSeleccionado = dayButton.dataset.agendaDate;
         const [year, month, day] = agendaDiaSeleccionado.split('-').map(Number);
         agendaMesActual = new Date(year, month - 1, 1);
-        renderCalendarioProgramacion();
+        if (canManageCalendar) renderCalendarioProgramacion();
     });
 
     document.getElementById('agendaTicketsDia')?.addEventListener('click', event => {
@@ -353,32 +477,47 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     async function obtenerTickets() {
+        const requestId = ++ticketsRequestId;
         mostrarLoading(true);
         try {
-            const res = await fetch('http://localhost:3000/api/tickets', {
+            const res = await fetch('/api/tickets', {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
 
             if (!res.ok) throw new Error('Error al obtener tickets');
 
             const tickets = await res.json();
+            if (requestId !== ticketsRequestId) return;
             window.allTickets = tickets;
-            cargarMetricasReportes();
-            renderSupportSummary();
+            if (canViewReports) cargarMetricasReportes();
+            if (canListAllTickets) renderSupportSummary();
             window.dispatchEvent(new CustomEvent('tickets:loaded', { detail: tickets }));
-            mostrarTickets(tickets);
-            actualizarDashboardKPIs(tickets);
-            renderCalendarioProgramacion();
+            if (dashboardCategoryFilter) {
+                await window.aplicarFiltros();
+            } else {
+                window.paginaActual = 1;
+                mostrarTickets(tickets.slice(0, window.limitePorPagina));
+                updateTicketPagination(tickets.length);
+            }
+            if (canListAllTickets) {
+                actualizarDashboardKPIs(tickets);
+                renderCalendarioProgramacion();
+            } else {
+                renderDashboardPersonal(tickets);
+                await cargarResumenPersonal();
+            }
         } catch (err) {
-            mostrarMensaje(err.message, "error");
+            if (requestId === ticketsRequestId) mostrarMensaje(err.message, "error");
         } finally {
-            mostrarLoading(false);
+            if (requestId === ticketsRequestId) mostrarLoading(false);
         }
     }
 
     let accountIncidences = [];
     let accountPlatformsChart = null;
     let accountResolutionChart = null;
+    let accountIncidentsRequestId = 0;
+    let accountStatsRequestId = 0;
 
     function formatearFechaCuenta(value) {
         if (!value) return 'Fecha no disponible';
@@ -440,8 +579,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }).format(new Date());
         const counts = new Map();
         accountIncidences.forEach(incidencia => {
-            const date = String(incidencia.fecha_creacion || '').slice(0, 7);
-            if (date !== currentMonth) return;
+            if (reportTicketMonth(incidencia) !== currentMonth) return;
             const platform = incidencia.plataforma || 'Sin plataforma';
             counts.set(platform, (counts.get(platform) || 0) + 1);
         });
@@ -491,6 +629,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const fallback = document.getElementById('accountChartFallback');
         const message = document.getElementById('accountResolutionChartMessage');
         if (!canvas || !fallback || !message) return;
+
+        if (!Number(stats.total)) {
+            if (accountResolutionChart) {
+                accountResolutionChart.destroy();
+                accountResolutionChart = null;
+            }
+            canvas.hidden = true;
+            fallback.hidden = false;
+            fallback.textContent = 'Sin datos';
+            message.textContent = 'No hay incidencias de cuentas para calcular porcentajes.';
+            return;
+        }
 
         const locallyResolved = Number(stats.resueltos_localmente_pct) || 0;
         const escalated = Number(stats.escalados_abancay_pct) || 0;
@@ -550,18 +700,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function cargarIncidenciasCuentas() {
+        const requestId = ++accountIncidentsRequestId;
         const list = document.getElementById('accountIncidentsList');
         const recent = document.getElementById('accountRecentIncidents');
         try {
             const data = await window.CuentasApi.getIncidencias();
             if (!Array.isArray(data)) throw new Error('La respuesta de incidencias de cuentas no es válida');
+            if (requestId !== accountIncidentsRequestId) return;
             accountIncidences = data;
-            cargarMetricasReportes();
-            renderSupportSummary();
+            if (canViewReports) cargarMetricasReportes();
+            if (canListAllTickets) renderSupportSummary();
             renderAccountIncidents(list);
             renderAccountIncidents(recent);
             if (puedeGestionarCuentas) renderAccountPlatformChart();
+            if (puedeGestionarCuentas) await cargarEstadisticasCuentas();
         } catch (error) {
+            if (requestId !== accountIncidentsRequestId) return;
             [list, recent].filter(Boolean).forEach(container => {
                 container.textContent = error.message;
             });
@@ -571,17 +725,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function cargarEstadisticasCuentas() {
+        const requestId = ++accountStatsRequestId;
         try {
             const data = await window.CuentasApi.getStats();
+            if (requestId !== accountStatsRequestId) return;
             const total = document.getElementById('accountKpiTotal');
             const resolved = document.getElementById('accountKpiLocal');
             const escalated = document.getElementById('accountKpiEscalated');
-            if (total) total.textContent = data.total ?? 0;
-            if (resolved) resolved.textContent = `${Number(data.resueltos_localmente_pct || 0)}%`;
-            if (escalated) escalated.textContent = `${Number(data.escalados_abancay_pct || 0)}%`;
+            if (total) total.textContent = String(data.total ?? 'Sin datos');
+            if (resolved) resolved.textContent = data.resueltos_localmente_pct === null
+                ? 'Sin datos' : `${Number(data.resueltos_localmente_pct)}%`;
+            if (escalated) escalated.textContent = data.escalados_abancay_pct === null
+                ? 'Sin datos' : `${Number(data.escalados_abancay_pct)}%`;
             renderAccountResolutionChart(data);
             renderAccountPlatformChart();
         } catch (error) {
+            if (requestId !== accountStatsRequestId) return;
             const chartMessage = document.getElementById('accountChartMessage');
             if (chartMessage) chartMessage.textContent = error.message;
             const resolutionMessage = document.getElementById('accountResolutionChartMessage');
@@ -589,19 +748,47 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    async function cargarResumenPersonal() {
+        const response = await fetch('/api/stats/me');
+        const summary = await response.json();
+        if (!response.ok) {
+            throw new Error(summary.error || 'No se pudo cargar el resumen personal');
+        }
+        const values = {
+            'personal-kpi-total': summary.total,
+            'personal-kpi-active': Number(summary.pendientes) + Number(summary.enProceso),
+            'personal-kpi-resolved': summary.solucionados,
+            'count-todos': summary.total,
+            'count-activos': Number(summary.pendientes) + Number(summary.enProceso),
+            'count-finalizados': summary.solucionados
+        };
+        Object.entries(values).forEach(([id, value]) => {
+            const element = document.getElementById(id);
+            if (element) element.textContent = String(value);
+        });
+        const rate = document.getElementById('kpi-tasa');
+        if (rate) rate.textContent = `${summary.tasaResolucionPct}%`;
+    }
+
     async function crearIncidenciaCuenta(event) {
         event.preventDefault();
         const form = event.currentTarget;
         const button = form.querySelector('button[type="submit"]');
         button.disabled = true;
+        let requestKey;
         try {
             const formData = new FormData(form);
-            const data = await window.CuentasApi.crearTicketCuenta(formData);
+            requestKey = pendingIdempotencyKey('account-incident');
+            const data = await window.CuentasApi.crearTicketCuenta(formData, requestKey);
+            clearPendingIdempotencyKey('account-incident');
             mostrarMensaje(data.mensaje || 'Solicitud de cuenta enviada correctamente', 'exito');
             form.reset();
             closeQuickTicket();
             await cargarIncidenciasCuentas();
         } catch (error) {
+            if (requestKey && error.status >= 400 && error.status < 500) {
+                clearPendingIdempotencyKey('account-incident');
+            }
             mostrarMensaje(error.message, 'error');
         } finally {
             button.disabled = false;
@@ -647,6 +834,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             · ${(Number(item.tamano_bytes) / 1024 / 1024).toFixed(2)} MB
                             · ${escapeHTML(formatearFechaCuenta(item.fecha_creacion))}
                         </small>
+                        <button type="button" class="btn-small"
+                            data-download-account-evidence="${item.id}"
+                            data-account-id="${incidencia.id}"
+                            data-file-name="${escapeHTML(item.nombre_original)}">Descargar evidencia</button>
                     </article>
                 `).join('')
                 : '<p class="text-muted">Todavía no hay evidencias adjuntas.</p>';
@@ -748,91 +939,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function mostrarTickets(tickets) {
         const lista = document.getElementById('tickets');
-        if (!lista) return;
-        lista.innerHTML = '';
-
-        const rol = localStorage.getItem('rol');
+        const header = document.getElementById('ticketsTableHeader');
+        if (!lista || !header || !window.UTEATicketTable) return;
+        window.UTEATicketTable.createHeader(header);
         let estadoFiltro = window.estadoFiltroActual || '';
 
         let ticketsMostrados = tickets;
         if (estadoFiltro === 'activos') {
-            ticketsMostrados = tickets.filter(t => !['Solucionado', 'Cerrado'].includes(t.estado));
+            ticketsMostrados = tickets.filter(t => !['Solucionado', 'Cerrado', 'Resuelto'].includes(t.estado));
         } else if (estadoFiltro === 'finalizados') {
-            ticketsMostrados = tickets.filter(t => ['Solucionado', 'Cerrado'].includes(t.estado));
+            ticketsMostrados = tickets.filter(t => ['Solucionado', 'Cerrado', 'Resuelto'].includes(t.estado));
         } else if (estadoFiltro && estadoFiltro !== 'todos') {
             ticketsMostrados = tickets.filter(t => t.estado === estadoFiltro);
         }
 
-        // Estado vacío cuando no hay tickets
-        if (ticketsMostrados.length === 0) {
-            lista.innerHTML = `
-                <div style="text-align:center; padding:60px 20px; color:var(--text-secondary);">
-                    <i class="ph ph-ticket" style="font-size:3rem; display:block; margin-bottom:12px; color:#d1d5db;"></i>
-                    <p style="margin:0 0 4px 0; font-size:1rem; font-weight:500;">No hay tickets ${estadoFiltro ? 'con estado "' + estadoFiltro + '"' : 'aún'}</p>
-                    <p style="margin:0; font-size:0.85rem;">Los tickets que crees aparecerán aquí</p>
-                </div>
-            `;
-            return;
-        }
-
-        ticketsMostrados.forEach(ticket => {
-            const div = document.createElement('div');
-            div.className = 'ticket-row';
-            
-            // Click en ticket para detalle
-            div.onclick = (e) => {
-                if (e.target.tagName !== 'BUTTON' && e.target.tagName !== 'INPUT') {
-                    mostrarDetalleTicket(ticket);
-                }
-            };
-            div.style.cursor = 'pointer';
-
-            let acciones = '';
-            if (rol === 'admin') {
-                acciones = `
-                    <button class="btn-action-icon success" onclick="event.stopPropagation(); resolverTicket(${ticket.id})" title="Resolver">
-                        <i class="ph ph-check"></i>
-                    </button>
-                    <button class="btn-action-icon danger" onclick="event.stopPropagation(); confirmarEliminar(${ticket.id})" title="Eliminar">
-                        <i class="ph ph-trash"></i>
-                    </button>
-                    <button class="btn-action-icon" onclick="event.stopPropagation(); editarTicket(${JSON.stringify(ticket).replace(/"/g, '&quot;')})" title="Editar">
-                        <i class="ph ph-pencil-simple"></i>
-                    </button>
-                    <button class="btn-action-icon" onclick="event.stopPropagation(); mostrarComentarios(${ticket.id})" title="Notas">
-                        <i class="ph ph-note-pencil"></i>
-                    </button>
-                `;
-            } else {
-                acciones = '';
-            }
-
-            const fechaFormat = ticket.fecha_creacion ? new Date(ticket.fecha_creacion).toLocaleDateString() : 'N/A';
-            const estadoClase = getEstadoClass(ticket.estado);
-
-            div.innerHTML = `
-                <div class="col-checkbox"><input type="checkbox"></div>
-                <div class="col-id t-id">#${ticket.id}</div>
-                <div class="col-date">${fechaFormat}</div>
-                <div class="col-name">${escapeHTML(ticket.solicitante_nombre || ticket.username || 'N/A')}</div>
-                <div class="col-subject t-subject"><i class="ph-fill ph-user"></i> ${escapeHTML(ticket.titulo)}
-                    <small style="display:block; margin:4px 0 0 20px; color:var(--text-secondary);">${escapeHTML(ticket.oficina_nombre || 'Sin oficina')} · ${escapeHTML(ticket.categoria_nombre || 'Sin categoría')}</small>
-                    ${ticket.bloque && ticket.ambiente
-                        ? `<small style="display:block; margin:4px 0 0 20px; color:var(--text-secondary);">${escapeHTML(ticket.bloque)} · ${escapeHTML(ticket.ambiente)}${ticket.aula ? ` · Aula ${escapeHTML(ticket.aula)}` : ''}</small>`
-                        : ticket.carrera ? `<small style="display:block; margin:4px 0 0 20px; color:var(--text-secondary);">Carrera: ${escapeHTML(ticket.carrera)}</small>` : ''}
-                    ${ticket.asignatura_area ? `<small style="display:block; margin:4px 0 0 20px; color:var(--text-secondary);">Asignatura / área: ${escapeHTML(ticket.asignatura_area)}</small>` : ''}
-                    <small style="display:block; margin:4px 0 0 20px; color:${getSlaStatus(ticket) === 'SLA vencido' ? '#dc2626' : 'var(--text-secondary)'};">${escapeHTML(getSlaStatus(ticket))}</small>
-                    ${ticket.fecha_programada_iso ? `<small style="display:block; margin:4px 0 0 20px; color:var(--text-secondary);">Solución prevista: ${escapeHTML(new Date(`${ticket.fecha_programada_iso}T12:00:00`).toLocaleDateString('es-PE'))}</small>` : ''}
-                </div>
-                <div class="col-status t-status ${estadoClase}">${escapeHTML(ticket.estado)}</div>
-                <div class="col-replier">${escapeHTML(ticket.tecnico || '-')}</div>
-                <div class="col-priority t-priority ${getPrioridadClass(ticket.prioridad)}">
-                    <i class="ph-fill ph-flag"></i> ${escapeHTML(ticket.prioridad)}
-                </div>
-                <div class="ticket-actions">${acciones}</div>
-            `;
-
-            lista.appendChild(div);
+        window.UTEATicketTable.render(lista, ticketsMostrados, {
+            canManage: canViewAdmin,
+            getPriorityClass: getPrioridadClass,
+            getStateClass: getEstadoClass,
+            getSlaStatus,
+            onOpenTicket: ticket => mostrarDetalleTicket(ticket),
+            onOpenAccount: id => mostrarDetalleIncidenciaCuenta(id),
+            onResolve: id => resolverTicket(id),
+            onDelete: id => confirmarEliminar(id),
+            onEdit: ticket => editarTicket(ticket),
+            onComments: id => mostrarComentarios(id)
         });
     }
 
@@ -989,7 +1120,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // Cargar técnicos y seleccionar el actual (admin)
         if (rol === 'admin') {
-            fetch('http://localhost:3000/api/tecnicos')
+            fetch('/api/tecnicos')
                 .then(res => res.json())
                 .then(tecnicos => {
                     const select = document.getElementById('tecnicoAsignar');
@@ -1022,7 +1153,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function cargarDiagnosticoTicket(ticketId) {
         try {
-            const res = await fetch(`http://localhost:3000/api/diagnosticos/${ticketId}`, {
+            const res = await fetch(`/api/diagnosticos/${ticketId}`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             const diagnostico = await res.json();
@@ -1080,7 +1211,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const button = form.querySelector('button[type="submit"]');
         button.disabled = true;
         try {
-            const res = await fetch(`http://localhost:3000/api/diagnosticos/${form.dataset.ticketId}`, {
+            const res = await fetch(`/api/diagnosticos/${form.dataset.ticketId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                 body: JSON.stringify(payload)
@@ -1131,7 +1262,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function guardarFechaProgramada(form, fecha) {
         try {
-            const res = await fetch(`http://localhost:3000/api/tickets/${form.dataset.ticketId}`, {
+            const res = await fetch(`/api/tickets/${form.dataset.ticketId}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1156,7 +1287,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!contenedor) return;
 
         try {
-            const res = await fetch(`http://localhost:3000/api/adjuntos/${ticketId}`, {
+            const res = await fetch(`/api/adjuntos/${ticketId}`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             const adjuntos = await res.json();
@@ -1196,7 +1327,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const formData = new FormData();
             formData.append('archivo', fileInput.files[0]);
-            const res = await fetch(`http://localhost:3000/api/adjuntos/${form.dataset.ticketId}`, {
+            const res = await fetch(`/api/adjuntos/${form.dataset.ticketId}`, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${token}` },
                 body: formData
@@ -1220,7 +1351,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             const { ticketId, downloadAttachment, fileName } = button.dataset;
-            const res = await fetch(`http://localhost:3000/api/adjuntos/${ticketId}/${downloadAttachment}/descargar`, {
+            const res = await fetch(`/api/adjuntos/${ticketId}/${downloadAttachment}/descargar`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (!res.ok) {
@@ -1241,7 +1372,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function cargarHistorialTicket(ticketId) {
         try {
-            const res = await fetch(`http://localhost:3000/api/tickets/${ticketId}/historial`, {
+            const res = await fetch(`/api/tickets/${ticketId}/historial`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
 
@@ -1276,7 +1407,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Cargar comentarios directamente en el panel de detalle del ticket
     async function cargarComentariosDetalle(ticketId) {
         try {
-            const res = await fetch(`http://localhost:3000/api/comentarios/${ticketId}`, {
+            const res = await fetch(`/api/comentarios/${ticketId}`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             const comentarios = await res.json();
@@ -1315,7 +1446,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!comentario) return;
 
         try {
-            const res = await fetch('http://localhost:3000/api/comentarios', {
+            const res = await fetch('/api/comentarios', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1342,7 +1473,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('editEstado').value = ticket.estado;
 
         // Cargar técnicos
-        fetch('http://localhost:3000/api/tecnicos')
+        fetch('/api/tecnicos')
             .then(res => res.json())
             .then(tecnicos => {
                 const select = document.getElementById('editTecnico');
@@ -1369,7 +1500,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const tecnico_id = document.getElementById('editTecnico').value;
 
             try {
-                const res = await fetch(`http://localhost:3000/api/tickets/${ticket.id}`, {
+                const res = await fetch(`/api/tickets/${ticket.id}`, {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
@@ -1401,7 +1532,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         try {
-            const res = await fetch(`http://localhost:3000/api/tickets/${ticketId}`, {
+            const res = await fetch(`/api/tickets/${ticketId}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1427,7 +1558,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window.ticketIdComentario = ticketId;
         
         // Cargar comentarios
-        const res = await fetch(`http://localhost:3000/api/comentarios/${ticketId}`, {
+        const res = await fetch(`/api/comentarios/${ticketId}`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         
@@ -1451,7 +1582,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!comentario) return;
         
         try {
-            const res = await fetch('http://localhost:3000/api/comentarios', {
+            const res = await fetch('/api/comentarios', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1502,13 +1633,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const asignatura_area = document.getElementById('asignaturaArea')?.value.trim() || '';
         const tecnico_id = puedeAsignarTecnico ? document.getElementById('asignarTecnico').value : null;
         const fotoIncidencia = document.getElementById('fotoIncidencia').files[0];
+        let requestKey;
 
         try {
             const { oficina_id, categoria_id } = await resolverCatalogoAmbiente(ambiente);
+            requestKey = pendingIdempotencyKey('ticket');
             const res = await fetch('/api/tickets', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'Idempotency-Key': requestKey
                 },
                 body: JSON.stringify({
                     titulo,
@@ -1532,14 +1666,19 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Error al crear ticket');
+            if (!res.ok) {
+                const error = new Error(data.error || 'Error al crear ticket');
+                error.status = res.status;
+                throw error;
+            }
+            clearPendingIdempotencyKey('ticket');
 
             let fotoError = '';
             if (fotoIncidencia) {
                 try {
                     const formData = new FormData();
                     formData.append('archivo', fotoIncidencia);
-                    const uploadRes = await fetch(`http://localhost:3000/api/adjuntos/${data.ticketId}`, {
+                    const uploadRes = await fetch(`/api/adjuntos/${data.ticketId}`, {
                         method: 'POST',
                         headers: { 'Authorization': `Bearer ${token}` },
                         body: formData
@@ -1570,7 +1709,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.resolverTicket = async (id) => {
         mostrarLoading(true);
         try {
-            const res = await fetch(`http://localhost:3000/api/tickets/${id}`, {
+            const res = await fetch(`/api/tickets/${id}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1581,7 +1720,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (!res.ok) throw new Error('Error al resolver ticket');
             mostrarMensaje('Ticket resuelto correctamente', 'exito');
-            obtenerTickets();
+            await obtenerTickets();
             cargarNotificaciones();
         } catch (err) {
             mostrarMensaje(err.message, "error");
@@ -1612,7 +1751,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.eliminarTicket = async (id) => {
         mostrarLoading(true);
         try {
-            const res = await fetch(`http://localhost:3000/api/tickets/${id}`, {
+            const res = await fetch(`/api/tickets/${id}`, {
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${token}` }
             });
@@ -1631,7 +1770,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!puedeAsignarTecnico) return;
 
         try {
-            const res = await fetch('http://localhost:3000/api/tecnicos');
+            const res = await fetch('/api/tecnicos');
             if (!res.ok) throw new Error('Error al cargar técnicos');
 
             const tecnicos = await res.json();
@@ -1650,12 +1789,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     window.logout = () => {
-        localStorage.removeItem('token');
-        localStorage.removeItem('rol');
+        localStorage.clear();
+        sessionStorage.clear();
         window.location.href = 'login.html';
     };
 
     window.estadoFiltroActual = '';
+    let dashboardCategoryFilter = null;
+    let ticketFilterRequestId = 0;
     window.paginaActual = 1;
     window.limitePorPagina = 10;
     window.totalPaginas = 1;
@@ -1682,11 +1823,46 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     window.aplicarFiltros = async () => {
+        const requestId = ++ticketFilterRequestId;
         const token = localStorage.getItem('token');
         if (typeof mostrarLoading === 'function') mostrarLoading(true);
         
         const estado = window.estadoFiltroActual;
         const busqueda = document.getElementById('searchInput')?.value || '';
+
+        if (dashboardCategoryFilter) {
+            const categoryCases = window.ReportMetrics.filterCategoryAndMonth(
+                getReportCases(),
+                dashboardCategoryFilter.category,
+                dashboardCategoryFilter.monthKey
+            );
+            updateDashboardCategoryCounts(categoryCases);
+            const searchTerm = busqueda.trim().toLocaleLowerCase('es');
+            let filteredCases = categoryCases.filter(ticket => {
+                if (estado === 'activos' && ['Solucionado', 'Cerrado', 'Resuelto'].includes(ticket.estado)) return false;
+                if (estado === 'finalizados' && !['Solucionado', 'Cerrado', 'Resuelto'].includes(ticket.estado)) return false;
+                if (estado && !['todos', 'activos', 'finalizados'].includes(estado) && ticket.estado !== estado) return false;
+                if (!searchTerm) return true;
+                return [
+                    ticket.titulo, ticket.solicitante_nombre, ticket.categoria_reporte,
+                    ticket.categoria_usuario, ticket.categoria_nombre, ticket.oficina_nombre,
+                    ticket.ubicacion, ticket.estado, ticket.tecnico, ticket.id
+                ].some(value => String(value || '').toLocaleLowerCase('es').includes(searchTerm));
+            });
+
+            const page = window.UTEATicketTable.paginate(
+                filteredCases,
+                window.paginaActual,
+                window.limitePorPagina
+            );
+            window.paginaActual = page.page;
+            window.totalPaginas = page.totalPages;
+            mostrarTickets(page.items);
+            updateTicketPagination(filteredCases.length);
+            updateDashboardCategoryFilter(categoryCases.length, filteredCases.length);
+            if (typeof mostrarLoading === 'function' && requestId === ticketFilterRequestId) mostrarLoading(false);
+            return;
+        }
         
         const params = new URLSearchParams({
             page: window.paginaActual,
@@ -1697,46 +1873,96 @@ document.addEventListener('DOMContentLoaded', () => {
         if (busqueda.trim()) params.append('busqueda', busqueda.trim());
         
         try {
-            const res = await fetch(`http://localhost:3000/api/tickets?${params.toString()}`, {
+            const res = await fetch(`/api/tickets?${params.toString()}`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             const responseData = await res.json();
+            if (requestId !== ticketFilterRequestId) return;
             if (!res.ok) throw new Error(responseData.error || 'Error cargando tickets');
 
             const tickets = Array.isArray(responseData) ? responseData : (responseData.data || []);
             const total = responseData.total !== undefined ? responseData.total : tickets.length;
             window.totalPaginas = responseData.totalPages || Math.ceil(total / window.limitePorPagina) || 1;
+            if (window.paginaActual > window.totalPaginas) {
+                window.paginaActual = window.totalPaginas;
+                await window.aplicarFiltros();
+                return;
+            }
 
             mostrarTickets(tickets);
-
-            // Actualizar controles de paginación
-            const infoEl = document.getElementById('paginacionInfo');
-            const pageIndicatorEl = document.getElementById('pageIndicator');
-            const btnPrev = document.getElementById('btnPrevPage');
-            const btnNext = document.getElementById('btnNextPage');
-
-            const inicio = total > 0 ? (window.paginaActual - 1) * window.limitePorPagina + 1 : 0;
-            const fin = Math.min(total, window.paginaActual * window.limitePorPagina);
-
-            if (infoEl) infoEl.textContent = `Mostrando ${inicio} - ${fin} de ${total} tickets`;
-            if (pageIndicatorEl) pageIndicatorEl.textContent = `Página ${window.paginaActual} de ${window.totalPaginas}`;
-            if (btnPrev) btnPrev.disabled = window.paginaActual <= 1;
-            if (btnNext) btnNext.disabled = window.paginaActual >= window.totalPaginas;
+            updateTicketPagination(total);
 
         } catch (err) {
-            if (typeof mostrarMensaje === 'function') mostrarMensaje(err.message, "error");
+            if (requestId === ticketFilterRequestId && typeof mostrarMensaje === 'function') {
+                mostrarMensaje(err.message, "error");
+            }
         } finally {
-            if (typeof mostrarLoading === 'function') mostrarLoading(false);
+            if (typeof mostrarLoading === 'function' && requestId === ticketFilterRequestId) mostrarLoading(false);
         }
     };
 
     window.limpiarFiltros = () => {
+        dashboardCategoryFilter = null;
         window.estadoFiltroActual = '';
         window.paginaActual = 1;
         const searchInput = document.getElementById('searchInput');
         if (searchInput) searchInput.value = '';
+        const categoryFilter = document.getElementById('dashboardCategoryFilter');
+        if (categoryFilter) categoryFilter.hidden = true;
+        const accountsCard = document.querySelector('.account-incidents-card');
+        if (accountsCard) accountsCard.hidden = false;
+        document.querySelectorAll('.filter-btn').forEach((button, index) =>
+            button.classList.toggle('active', index === 0)
+        );
+        if (canListAllTickets) updateDashboardCategoryCounts(window.allTickets || []);
+        if (searchTimeout) clearTimeout(searchTimeout);
         aplicarFiltros();
     };
+
+    function updateTicketPagination(total) {
+        const pages = Math.max(1, Math.ceil(total / window.limitePorPagina));
+        window.totalPaginas = pages;
+        const start = total > 0 ? (window.paginaActual - 1) * window.limitePorPagina + 1 : 0;
+        const end = Math.min(total, window.paginaActual * window.limitePorPagina);
+        const info = document.getElementById('paginacionInfo');
+        const indicator = document.getElementById('pageIndicator');
+        const previous = document.getElementById('btnPrevPage');
+        const next = document.getElementById('btnNextPage');
+        const resultType = dashboardCategoryFilter ? 'incidencias' : 'tickets';
+        if (info) info.textContent = `Mostrando ${start} - ${end} de ${total} ${resultType}`;
+        if (indicator) indicator.textContent = `Página ${window.paginaActual} de ${pages}`;
+        if (previous) previous.disabled = window.paginaActual <= 1;
+        if (next) next.disabled = window.paginaActual >= pages;
+    }
+
+    function updateDashboardCategoryFilter(categoryCount, resultCount) {
+        const filter = document.getElementById('dashboardCategoryFilter');
+        const label = document.getElementById('dashboardCategoryFilterLabel');
+        const count = document.getElementById('dashboardCategoryFilterCount');
+        if (filter) filter.hidden = !dashboardCategoryFilter;
+        if (label) {
+            label.textContent = `${dashboardCategoryFilter.category} · ${reportMonthLabel(dashboardCategoryFilter.monthKey)}`;
+        }
+        if (count) {
+            count.textContent = `${resultCount} resultado${resultCount === 1 ? '' : 's'}${resultCount !== categoryCount ? ` de ${categoryCount}` : ''}`;
+        }
+    }
+
+    function updateDashboardCategoryCounts(tickets) {
+        const resolved = tickets.filter(ticket =>
+            ['Solucionado', 'Cerrado', 'Resuelto'].includes(ticket.estado)
+        ).length;
+        const active = tickets.length - resolved;
+        const counts = {
+            'count-todos': tickets.length,
+            'count-activos': active,
+            'count-finalizados': resolved
+        };
+        Object.entries(counts).forEach(([id, value]) => {
+            const element = document.getElementById(id);
+            if (element) element.textContent = String(value);
+        });
+    }
 
     // Escuchar búsqueda en tiempo real con debounce
     let searchTimeout = null;
@@ -1744,6 +1970,9 @@ document.addEventListener('DOMContentLoaded', () => {
         clearTimeout(searchTimeout);
         searchTimeout = setTimeout(() => {
             window.paginaActual = 1;
+            if (document.getElementById('searchInput').value.trim()) {
+                window.cambiarVista('tickets');
+            }
             aplicarFiltros();
         }, 300);
     });
@@ -1763,11 +1992,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     tipoSolicitanteSelect?.addEventListener('change', sincronizarCampoAsignaturaDocente);
     sincronizarCampoAsignaturaDocente();
-    document.getElementById('formTicket')?.addEventListener('submit', crearTicket);
+    const legacyTicketForm = document.getElementById('formTicket');
+    if (legacyTicketForm && !legacyTicketForm.dataset.ticketSubmitOwner) {
+        legacyTicketForm.dataset.ticketSubmitOwner = 'legacy';
+        legacyTicketForm.addEventListener('submit', crearTicket);
+    }
     document.getElementById('accountTicketForm')?.addEventListener('submit', crearIncidenciaCuenta);
 
     // SPA Routing Logic
     window.cambiarVista = (viewId) => {
+        if ((!canViewReports && viewId === 'reportes') ||
+            (!canViewAdmin && ['admin', 'configuracion', 'clientes', 'plantillas', 'integraciones', 'ajustes'].includes(viewId)) ||
+            (!canViewOwnProfile && viewId === 'perfil')) {
+            viewId = 'dashboard';
+        }
+
         document.querySelectorAll('.view-section').forEach(s => s.classList.remove('active'));
         
         const targetView = document.getElementById(`view-${viewId}`);
@@ -1783,12 +2022,87 @@ document.addEventListener('DOMContentLoaded', () => {
         if(navItem) navItem.classList.add('active');
     };
 
-    document.querySelectorAll('.nav-item').forEach(item => {
+    document.querySelectorAll('.nav-item[data-view]').forEach(item => {
         item.addEventListener('click', (e) => {
             e.preventDefault();
             const viewId = item.getAttribute('data-view');
             cambiarVista(viewId);
         });
+    });
+    document.getElementById('ticketsNewRequestButton')?.addEventListener('click', () => {
+        document.getElementById('quickTicketOpen')?.click();
+    });
+    document.getElementById('personalEmptyNewTicket')?.addEventListener('click', () => {
+        document.getElementById('quickTicketOpen')?.click();
+    });
+
+    async function loadOwnProfile() {
+        const response = await fetch('/api/auth/me/profile');
+        const profile = await response.json();
+        if (!response.ok) throw new Error(profile.error || 'No se pudo cargar el perfil');
+        document.getElementById('profileUsername').value = profile.username || '';
+        document.getElementById('profileRole').value = rolBadge?.textContent || 'Solicitante';
+        document.getElementById('profileOffice').value = profile.oficina_nombre || 'No asignada';
+        document.getElementById('profileFullName').value = profile.nombre_completo || '';
+        document.getElementById('profileEmail').value = profile.correo_institucional || '';
+    }
+
+    document.getElementById('profileNav')?.addEventListener('click', async () => {
+        try {
+            await loadOwnProfile();
+        } catch (error) {
+            mostrarMensaje(error.message, 'error');
+        }
+    });
+
+    document.getElementById('profileForm')?.addEventListener('submit', async event => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const submitButton = form.querySelector('[type="submit"]');
+        submitButton.disabled = true;
+        try {
+            const response = await fetch('/api/auth/me/profile', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    nombre_completo: document.getElementById('profileFullName').value,
+                    correo_institucional: document.getElementById('profileEmail').value
+                })
+            });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error || 'No se pudo actualizar el perfil');
+            mostrarMensaje(result.mensaje, 'exito');
+            await loadOwnProfile();
+        } catch (error) {
+            mostrarMensaje(error.message, 'error');
+        } finally {
+            submitButton.disabled = false;
+        }
+    });
+
+    document.getElementById('profilePasswordForm')?.addEventListener('submit', async event => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const submitButton = form.querySelector('[type="submit"]');
+        submitButton.disabled = true;
+        try {
+            const response = await fetch('/api/auth/me/password', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    current_password: document.getElementById('profileCurrentPassword').value,
+                    new_password: document.getElementById('profileNewPassword').value
+                })
+            });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error || 'No se pudo actualizar la contraseña');
+            form.reset();
+            mostrarMensaje(result.mensaje, 'exito');
+        } catch (error) {
+            mostrarMensaje(error.message, 'error');
+        } finally {
+            submitButton.disabled = false;
+        }
     });
 
     const quickTicketModal = document.getElementById('quickTicketModal');
@@ -1920,6 +2234,11 @@ document.addEventListener('DOMContentLoaded', () => {
         button.addEventListener('click', closeEscalation);
     });
     document.getElementById('ticketDetalle')?.addEventListener('click', event => {
+        const downloadButton = event.target.closest('[data-download-account-evidence]');
+        if (downloadButton) {
+            descargarEvidenciaCuenta(downloadButton);
+            return;
+        }
         const button = event.target.closest('[data-open-escalation]');
         if (!button) return;
         activeEscalationId = Number(button.dataset.openEscalation);
@@ -1928,6 +2247,23 @@ document.addEventListener('DOMContentLoaded', () => {
         if (area) area.value = 'Soporte de cuentas institucionales';
         setDialogOpen(escalationModal, escalationOverlay, true);
     });
+
+    async function descargarEvidenciaCuenta(button) {
+        try {
+            const response = await window.CuentasApi.descargarEvidencia(
+                button.dataset.accountId,
+                button.dataset.downloadAccountEvidence
+            );
+            const objectUrl = URL.createObjectURL(await response.blob());
+            const link = document.createElement('a');
+            link.href = objectUrl;
+            link.download = button.dataset.fileName;
+            link.click();
+            setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+        } catch (error) {
+            mostrarMensaje(error.message, 'error');
+        }
+    }
 
     document.getElementById('escalationForm')?.addEventListener('submit', async event => {
         event.preventDefault();
@@ -1985,10 +2321,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     const agendaTrigger = document.getElementById('openAgendaModal');
-    agendaTrigger?.addEventListener('click', () => {
-        setDialogOpen(agendaModal, agendaModalOverlay, true);
-        renderCalendarioProgramacion();
-    });
+    if (canManageCalendar) {
+        agendaTrigger?.addEventListener('click', () => {
+            setDialogOpen(agendaModal, agendaModalOverlay, true);
+            renderCalendarioProgramacion();
+        });
+    } else if (agendaTrigger) {
+        agendaTrigger.hidden = true;
+    }
     const closeAgenda = () => setDialogOpen(agendaModal, agendaModalOverlay, false, agendaTrigger);
     document.getElementById('closeAgendaModal')?.addEventListener('click', closeAgenda);
     agendaModalOverlay?.addEventListener('click', closeAgenda);
@@ -2106,7 +2446,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         try {
-            const res = await fetch('http://localhost:3000/api/auth/usuarios', {
+            const res = await fetch('/api/auth/usuarios', {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
 
@@ -2178,7 +2518,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (list) list.innerHTML = '<p style="margin:0; color:var(--text-secondary);">Cargando oficinas...</p>';
 
         try {
-            const res = await fetch('http://localhost:3000/api/catalogos/oficinas', {
+            const res = await fetch('/api/catalogos/oficinas', {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             const oficinas = await res.json();
@@ -2243,7 +2583,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (list) list.innerHTML = '<p style="margin:0; color:var(--text-secondary);">Cargando categorías...</p>';
 
         try {
-            const res = await fetch(`http://localhost:3000/api/catalogos/categorias?oficina_id=${oficinaId}`, {
+            const res = await fetch(`/api/catalogos/categorias?oficina_id=${oficinaId}`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             const categorias = await res.json();
@@ -2271,7 +2611,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const message = document.getElementById('adminUserMessage');
 
         try {
-            const endpoint = editingId ? `http://localhost:3000/api/catalogos/oficinas/${editingId}` : 'http://localhost:3000/api/catalogos/oficinas';
+            const endpoint = editingId ? `/api/catalogos/oficinas/${editingId}` : '/api/catalogos/oficinas';
             const method = editingId ? 'PATCH' : 'POST';
             const payload = editingId ? { nombre, descripcion } : { codigo, nombre, descripcion };
 
@@ -2308,7 +2648,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (button.dataset.officeAction === 'edit') {
             try {
-                const res = await fetch('http://localhost:3000/api/catalogos/oficinas', {
+                const res = await fetch('/api/catalogos/oficinas', {
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
                 const oficinas = await res.json();
@@ -2332,7 +2672,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (button.dataset.officeAction === 'delete') {
             try {
-                const res = await fetch(`http://localhost:3000/api/catalogos/oficinas/${officeId}`, {
+                const res = await fetch(`/api/catalogos/oficinas/${officeId}`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                     body: JSON.stringify({ activo: false })
@@ -2372,7 +2712,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         try {
-            const endpoint = editingId ? `http://localhost:3000/api/catalogos/categorias/${editingId}` : 'http://localhost:3000/api/catalogos/categorias';
+            const endpoint = editingId ? `/api/catalogos/categorias/${editingId}` : '/api/catalogos/categorias';
             const method = editingId ? 'PATCH' : 'POST';
             const payload = editingId ? { nombre, descripcion } : { oficina_id: Number(oficina_id), categoria_padre_id, codigo, nombre, descripcion };
 
@@ -2408,7 +2748,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (button.dataset.categoryAction === 'edit') {
             try {
-                const res = await fetch(`http://localhost:3000/api/catalogos/categorias?oficina_id=${oficinaId}`, {
+                const res = await fetch(`/api/catalogos/categorias?oficina_id=${oficinaId}`, {
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
                 const categorias = await res.json();
@@ -2433,7 +2773,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (button.dataset.categoryAction === 'delete') {
             try {
-                const res = await fetch(`http://localhost:3000/api/catalogos/categorias/${categoryId}`, {
+                const res = await fetch(`/api/catalogos/categorias/${categoryId}`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                     body: JSON.stringify({ activo: false })
@@ -2470,7 +2810,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         try {
-            const res = await fetch('http://localhost:3000/api/auth/admin', {
+            const res = await fetch('/api/auth/admin', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -2507,7 +2847,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (action === 'toggle-role') {
             const nextRole = button.dataset.userRole === 'admin' ? 'usuario' : 'admin';
             try {
-                const res = await fetch(`http://localhost:3000/api/auth/usuarios/${id}/rol`, {
+                const res = await fetch(`/api/auth/usuarios/${id}/rol`, {
                     method: 'PATCH',
                     headers: {
                         'Content-Type': 'application/json',
@@ -2533,7 +2873,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (action === 'delete-user') {
             try {
-                const res = await fetch(`http://localhost:3000/api/auth/usuarios/${id}`, {
+                const res = await fetch(`/api/auth/usuarios/${id}`, {
                     method: 'DELETE',
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
@@ -2561,26 +2901,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (adminName) adminName.textContent = username || 'Administrador';
     }
 
-    // Search Logic
-    const searchInput = document.getElementById('searchInput');
-    if(searchInput) {
-        searchInput.addEventListener('input', (e) => {
-            const query = e.target.value.toLowerCase();
-            const filtered = window.allTickets.filter(t => 
-                (t.titulo && t.titulo.toLowerCase().includes(query)) || 
-                (t.username && t.username.toLowerCase().includes(query)) ||
-                (t.categoria_nombre && t.categoria_nombre.toLowerCase().includes(query)) ||
-                (t.oficina_nombre && t.oficina_nombre.toLowerCase().includes(query)) ||
-                (t.id && t.id.toString().includes(query))
-            );
-            mostrarTickets(filtered);
-            
-            if(query.length > 0) {
-                cambiarVista('tickets');
-            }
-        });
-    }
-
     const configHomeView = document.getElementById('configHomeView');
     if (configHomeView) {
         const savedHomeView = localStorage.getItem('homeView');
@@ -2596,6 +2916,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // KPIs & Calendar
     function actualizarDashboardKPIs(tickets) {
+        if (!canListAllTickets) return;
         const kpiTotal = document.getElementById('kpi-total');
         if(kpiTotal) kpiTotal.textContent = tickets.length;
         
@@ -2625,6 +2946,67 @@ document.addEventListener('DOMContentLoaded', () => {
         if(cResueltos) cResueltos.textContent = resueltos;
         
         generarActividadReciente(tickets);
+    }
+
+    function renderDashboardPersonal(tickets) {
+        const orderedTickets = [...tickets].sort((left, right) =>
+            new Date(right.fecha_creacion || 0) - new Date(left.fecha_creacion || 0)
+        );
+        const resolvedStates = ['Solucionado', 'Cerrado'];
+        const activeTickets = orderedTickets.filter(ticket => !resolvedStates.includes(ticket.estado));
+        const resolvedTickets = orderedTickets.filter(ticket => resolvedStates.includes(ticket.estado));
+        const values = {
+            'personal-kpi-total': orderedTickets.length,
+            'personal-kpi-active': activeTickets.length,
+            'personal-kpi-resolved': resolvedTickets.length
+        };
+        Object.entries(values).forEach(([id, value]) => {
+            const element = document.getElementById(id);
+            if (element) element.textContent = String(value);
+        });
+
+        const emptyState = document.getElementById('personalEmptyState');
+        const lists = document.getElementById('personalDashboardLists');
+        if (emptyState) emptyState.hidden = orderedTickets.length > 0;
+        if (lists) lists.hidden = orderedTickets.length === 0;
+
+        const recentTickets = document.getElementById('personalRecentTickets');
+        const recentUpdates = document.getElementById('personalRecentUpdates');
+        if (orderedTickets.length === 0) {
+            if (recentTickets) recentTickets.replaceChildren();
+            if (recentUpdates) recentUpdates.replaceChildren();
+            return;
+        }
+
+        const renderEntries = (container, entries, showCreationDate) => {
+            if (!container) return;
+            container.replaceChildren();
+            entries.slice(0, 6).forEach(ticket => {
+                const item = document.createElement('button');
+                item.type = 'button';
+                item.className = 'account-incident-row';
+                item.addEventListener('click', () => mostrarDetalleTicket(ticket));
+                const details = document.createElement('span');
+                details.className = 'account-incident-main';
+                const title = document.createElement('strong');
+                title.textContent = `#${ticket.id} · ${ticket.titulo}`;
+                const description = document.createElement('small');
+                const date = ticket.fecha_creacion
+                    ? new Date(ticket.fecha_creacion).toLocaleString('es-PE')
+                    : 'Fecha no disponible';
+                description.textContent = showCreationDate
+                    ? `Creado ${date}`
+                    : `Estado actual: ${ticket.estado || 'Sin estado'} · ${date}`;
+                details.append(title, description);
+                const status = document.createElement('span');
+                status.className = `t-status ${getEstadoClass(ticket.estado)}`;
+                status.textContent = ticket.estado || 'Sin estado';
+                item.append(details, status);
+                container.appendChild(item);
+            });
+        };
+        renderEntries(recentTickets, orderedTickets, true);
+        renderEntries(recentUpdates, orderedTickets, false);
     }
 
     // Actividad reciente con datos reales
@@ -2694,7 +3076,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function cargarNotificaciones() {
         try {
             // Obtener conteo de no leídas
-            const countRes = await fetch('http://localhost:3000/api/notificaciones/count', {
+            const countRes = await fetch('/api/notificaciones/count', {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (!countRes.ok) return;
@@ -2710,11 +3092,14 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // Obtener lista de notificaciones
-            const res = await fetch('http://localhost:3000/api/notificaciones', {
+            const res = await fetch('/api/notificaciones', {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (!res.ok) return;
             const notificaciones = await res.json();
+            if (!canListAllTickets) {
+                renderPersonalUpdates(notificaciones);
+            }
 
             const content = document.getElementById('notifContent');
             if (!content) return;
@@ -2780,7 +3165,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             cambiarVista('tickets');
                         }
                         // Marcar como leída
-                        fetch(`http://localhost:3000/api/notificaciones/${n.id}/leer`, {
+                        fetch(`/api/notificaciones/${n.id}/leer`, {
                             method: 'PUT',
                             headers: { 'Authorization': `Bearer ${token}` }
                         });
@@ -2793,13 +3178,52 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function renderPersonalUpdates(notificaciones) {
+        const container = document.getElementById('personalRecentUpdates');
+        if (!container) return;
+        container.replaceChildren();
+        if (!Array.isArray(notificaciones) || notificaciones.length === 0) {
+            const empty = document.createElement('p');
+            empty.className = 'text-muted';
+            empty.textContent = 'No tienes actualizaciones recientes.';
+            container.appendChild(empty);
+            return;
+        }
+
+        notificaciones.slice(0, 6).forEach(notification => {
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'account-incident-row';
+            const details = document.createElement('span');
+            details.className = 'account-incident-main';
+            const message = document.createElement('strong');
+            message.textContent = notification.mensaje || 'Actualización de ticket';
+            const date = document.createElement('small');
+            date.textContent = formatearFechaCuenta(notification.fecha);
+            details.append(message, date);
+            item.appendChild(details);
+            if (notification.ticket_id) {
+                item.addEventListener('click', () => {
+                    const ticket = window.allTickets.find(entry =>
+                        Number(entry.id) === Number(notification.ticket_id)
+                    );
+                    if (ticket) mostrarDetalleTicket(ticket);
+                    else cambiarVista('tickets');
+                });
+            } else {
+                item.disabled = true;
+            }
+            container.appendChild(item);
+        });
+    }
+
     // Marcar todas como leídas
     const btnLeer = document.getElementById('btnMarcarLeidas');
     if (btnLeer) {
         btnLeer.addEventListener('click', async (e) => {
             e.stopPropagation();
             try {
-                await fetch('http://localhost:3000/api/notificaciones/leer', {
+                await fetch('/api/notificaciones/leer', {
                     method: 'PUT',
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
@@ -2819,7 +3243,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         try {
-            const res = await fetch(`http://localhost:3000/api/diagnosticos/auto/categoria/${categoriaId}`, {
+            const res = await fetch(`/api/diagnosticos/auto/categoria/${categoriaId}`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             const diag = await res.json();
@@ -2875,6 +3299,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- REPORTE MENSUAL PDF & EXCEL (CSV) ---
     window.generarReportePDFMensual = function() {
+        if (!canViewReports) return;
         const mesAnio = new Date().toLocaleDateString('es-PE', { month: 'long', year: 'numeric' });
         const printWindow = window.open('', '_blank');
         const total = window.allTickets ? window.allTickets.length : 0;
@@ -2957,6 +3382,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     window.exportarTicketsExcel = function() {
+        if (!canViewReports) return;
         if (!window.allTickets || !window.allTickets.length) {
             if (window.mostrarMensaje) window.mostrarMensaje('No hay tickets disponibles para exportar', 'error');
             return;
@@ -2989,8 +3415,9 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     async function cargarMetricasReportes() {
+        if (!canViewReports) return;
         try {
-            const res = await fetch('http://localhost:3000/api/stats', {
+            const res = await fetch('/api/stats', {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (!res.ok) return;
@@ -3001,9 +3428,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const resEl = document.getElementById('rep-kpi-resueltos');
             if (resEl) resEl.textContent = data.solucionados || 0;
             const tiempoEl = document.getElementById('rep-kpi-tiempo');
-            if (tiempoEl) tiempoEl.textContent = `${data.tiempoPromedioHoras || '2.4'} hrs`;
+            if (tiempoEl) tiempoEl.textContent = data.tiempoPromedioHoras === null
+                ? 'Sin datos' : `${data.tiempoPromedioHoras} h`;
             const csatEl = document.getElementById('rep-kpi-csat');
-            if (csatEl) csatEl.textContent = `${data.csatPromedio || '4.8'} / 5`;
+            if (csatEl) csatEl.textContent = data.csatPromedio === null
+                ? 'Sin datos' : `${data.csatPromedio} / 5`;
 
             const renderBarList = (containerId, list, labelKey, valueKey) => {
                 const container = document.getElementById(containerId);
@@ -3035,8 +3464,8 @@ document.addEventListener('DOMContentLoaded', () => {
             renderBarList('repOficinasList', data.porOficina, 'oficina', 'cantidad');
             renderBarList('repTecnicosList', data.porTecnico, 'tecnico', 'cantidad');
 
-        } catch(e) {
-            // Silenciar
+        } catch(error) {
+            console.error('No se pudieron actualizar las métricas del reporte:', error.message);
         }
     }
 
@@ -3061,64 +3490,92 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function reportTicketMonth(ticket) {
-        const date = new Date(ticket.fecha_creacion);
-        if (!Number.isFinite(date.getTime())) return '';
-        const parts = new Intl.DateTimeFormat('en-CA', {
-            timeZone: 'America/Lima',
-            year: 'numeric',
-            month: '2-digit'
-        }).formatToParts(date);
-        const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
-        return `${values.year}-${values.month}`;
+    function reportTimestamp(value) {
+        return window.ReportMetrics.timestamp(value);
     }
 
-    function getReportTickets() {
-        const monthKey = reportMonthSelect?.value || currentReportMonth();
-        const tickets = (window.allTickets || [])
-            .filter(ticket => reportTicketMonth(ticket) === monthKey)
-            .map(ticket => ({
+    function reportTicketMonth(ticket) {
+        return window.ReportMetrics.month(ticket.fecha_creacion);
+    }
+
+    function reportResolvedTimestamps(ticket) {
+        const historyTimestamps = String(ticket.report_resolutions_ms || '')
+            .split(',')
+            .map(reportTimestamp)
+            .filter(Number.isFinite);
+        const timestamps = [...historyTimestamps];
+        if (!historyTimestamps.length) {
+            const legacyResolution = reportTimestamp(ticket.sla_resolved_at);
+            if (Number.isFinite(legacyResolution)) timestamps.push(legacyResolution);
+        }
+        if (ticket.account_estado === 'RESUELTO') {
+            const accountResolution = reportTimestamp(ticket.account_fecha_resolucion);
+            if (Number.isFinite(accountResolution)) timestamps.push(accountResolution);
+        }
+        return [...new Set(timestamps)].sort((left, right) => left - right);
+    }
+
+    function reportResolvedTimestamp(ticket) {
+        const timestamps = reportResolvedTimestamps(ticket);
+        return timestamps.length ? timestamps[timestamps.length - 1] : NaN;
+    }
+
+    function getReportCases() {
+        const { tickets: linkedTickets, independentAccounts } =
+            window.ReportMetrics.mergeLinkedAccountIncidents(window.allTickets || [], accountIncidences);
+        const tickets = linkedTickets.map(ticket => ({
                 ...ticket,
                 categoria_reporte: ticket.categoria_usuario || ticket.categoria_nombre
             }));
-        const accountTickets = accountIncidences
-            .filter(incident => reportTicketMonth(incident) === monthKey)
-            .map(incident => ({
+        const accountTickets = independentAccounts.map(incident => ({
                 ...incident,
                 id: `CTA-${incident.id}`,
                 reportAccountId: incident.id,
+                reportReference: `Cuenta #${incident.id}`,
                 titulo: `${incident.tipo_problema || 'Solicitud de acceso'} · ${incident.plataforma || 'Cuenta institucional'}`,
                 solicitante_nombre: [incident.nombres, incident.apellidos].filter(Boolean).join(' ') || '—',
+                tipo_solicitante: incident.tipo_usuario,
                 categoria_nombre: 'Cuentas institucionales',
                 categoria_reporte: 'Cuentas institucionales',
-                oficina_nombre: incident.oficina || 'Soporte institucional',
-                tecnico: 'Soporte institucional',
+                oficina_nombre: incident.oficina || '',
                 estado: incident.estado === 'RESUELTO'
                     ? 'Resuelto'
                     : incident.estado === 'ESCALADO_ABANCAY'
                         ? 'Escalado a Abancay'
                         : incident.estado || 'Nuevo',
-                sla_resolved_at: incident.fecha_resolucion
+                account_estado: incident.estado,
+                account_fecha_resolucion: incident.fecha_resolucion
             }));
         return [...tickets, ...accountTickets];
     }
 
+    function getReportTickets() {
+        const monthKey = reportMonthSelect?.value || currentReportMonth();
+        return getReportCases().filter(ticket => reportTicketMonth(ticket) === monthKey);
+    }
+
+    function getReportResolvedTickets(monthKey) {
+        return getReportCases().flatMap(ticket => {
+            const monthResolutions = reportResolvedTimestamps(ticket)
+                .filter(timestamp => window.ReportMetrics.month(timestamp) === monthKey);
+            return monthResolutions.length
+                ? [{ ...ticket, reportResolvedAt: monthResolutions[monthResolutions.length - 1] }]
+                : [];
+        });
+    }
+
     function isClosedReportTicket(ticket) {
-        return ['Solucionado', 'Cerrado', 'Resuelto'].includes(ticket.estado);
+        return ['Solucionado', 'Cerrado', 'Resuelto'].includes(ticket.estado) ||
+            ticket.account_estado === 'RESUELTO';
     }
 
     function reportMeanElapsedHours(tickets, endField) {
-        const durations = tickets.map(ticket => {
-            const created = new Date(ticket.fecha_creacion).getTime();
-            const rawEnd = ticket[endField];
-            const end = typeof rawEnd === 'number' || /^\d+$/.test(String(rawEnd || ''))
-                ? Number(rawEnd)
-                : new Date(rawEnd).getTime();
-            return Number.isFinite(created) && Number.isFinite(end) && end >= created
-                ? (end - created) / 3600000
-                : null;
-        }).filter(value => value !== null);
-        return durations.length ? durations.reduce((sum, value) => sum + value, 0) / durations.length : null;
+        return window.ReportMetrics.meanElapsedHours(
+            tickets,
+            ticket => endField === 'reportResolvedAt'
+                ? ticket.reportResolvedAt ?? reportResolvedTimestamp(ticket)
+                : ticket[endField]
+        );
     }
 
     function formatReportDuration(hours) {
@@ -3133,10 +3590,18 @@ document.addEventListener('DOMContentLoaded', () => {
         (window.allTickets || []).forEach(ticket => {
             const month = reportTicketMonth(ticket);
             if (/^\d{4}-\d{2}$/.test(month)) months.add(month);
+            String(ticket.report_resolutions_ms || '').split(',').forEach(value => {
+                const resolvedMonth = window.ReportMetrics.month(value);
+                if (/^\d{4}-\d{2}$/.test(resolvedMonth)) months.add(resolvedMonth);
+            });
+            const resolvedMonth = reportTicketMonth({ fecha_creacion: reportTimestamp(ticket.sla_resolved_at) });
+            if (/^\d{4}-\d{2}$/.test(resolvedMonth)) months.add(resolvedMonth);
         });
         accountIncidences.forEach(incident => {
             const month = reportTicketMonth(incident);
             if (/^\d{4}-\d{2}$/.test(month)) months.add(month);
+            const resolvedMonth = reportTicketMonth({ fecha_creacion: reportTimestamp(incident.fecha_resolucion) });
+            if (/^\d{4}-\d{2}$/.test(resolvedMonth)) months.add(resolvedMonth);
         });
         const selected = reportMonthSelect.value || currentMonth;
         reportMonthSelect.replaceChildren(...[...months].sort().reverse().map(month =>
@@ -3218,7 +3683,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         tickets.forEach(ticket => {
             const row = body.insertRow();
-            const createdAt = new Date(ticket.fecha_creacion);
+            const createdTimestamp = reportTimestamp(ticket.fecha_creacion);
+            const createdAt = new Date(createdTimestamp);
             const dateLabel = Number.isFinite(createdAt.getTime())
                 ? createdAt.toLocaleDateString('es-PE', {
                     day: '2-digit',
@@ -3228,7 +3694,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 })
                 : '—';
             [
-                `#${ticket.id} · ${ticket.titulo || 'Sin asunto'}`,
+                `${ticket.reportReference || `#${ticket.id}`} · ${ticket.titulo || 'Sin asunto'}`,
                 ticket.solicitante_nombre || ticket.username || '—',
                 ticket.categoria_usuario || ticket.categoria_nombre || 'Sin categoría',
                 ticket.prioridad || '—',
@@ -3241,14 +3707,26 @@ document.addEventListener('DOMContentLoaded', () => {
             const button = document.createElement('button');
             button.type = 'button';
             button.className = 'btn-small report-open-ticket';
-            if (ticket.reportAccountId) {
+            if (String(ticket.id).startsWith('CTA-')) {
                 button.dataset.reportAccountId = ticket.reportAccountId;
+                button.textContent = 'Abrir cuenta';
+                button.setAttribute('aria-label', `Abrir incidencia de cuenta ${ticket.reportAccountId}`);
+                actionCell.appendChild(button);
             } else {
                 button.dataset.reportTicketId = ticket.id;
+                button.textContent = 'Abrir ticket';
+                button.setAttribute('aria-label', `Abrir ticket ${ticket.id}`);
+                actionCell.appendChild(button);
+                if (ticket.reportAccountId) {
+                    const accountButton = document.createElement('button');
+                    accountButton.type = 'button';
+                    accountButton.className = 'btn-small report-open-ticket';
+                    accountButton.dataset.reportAccountId = ticket.reportAccountId;
+                    accountButton.textContent = `Cuenta #${ticket.reportAccountId}`;
+                    accountButton.setAttribute('aria-label', `Abrir incidencia de cuenta ${ticket.reportAccountId}`);
+                    actionCell.appendChild(accountButton);
+                }
             }
-            button.textContent = 'Abrir';
-            button.setAttribute('aria-label', `Abrir ticket ${ticket.id}`);
-            actionCell.appendChild(button);
         });
     }
 
@@ -3256,18 +3734,18 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!reportMonthSelect) return;
         const monthKey = reportMonthSelect.value || currentReportMonth();
         const tickets = getReportTickets();
-        const closed = tickets.filter(isClosedReportTicket);
-        const resolutionRate = tickets.length ? Math.round(closed.length * 100 / tickets.length) : 0;
+        const resolved = getReportResolvedTickets(monthKey);
+        const open = tickets.filter(ticket => !isClosedReportTicket(ticket));
 
         document.getElementById('rep-kpi-total').textContent = String(tickets.length);
-        document.getElementById('rep-kpi-total-note').textContent = `Incluye tickets y cuentas · ${reportMonthLabel(monthKey)}`;
-        document.getElementById('rep-kpi-resueltos').textContent = String(closed.length);
-        document.getElementById('rep-kpi-resueltos-note').textContent = `${resolutionRate}% de las registradas`;
-        document.getElementById('rep-kpi-abiertos').textContent = String(tickets.length - closed.length);
+        document.getElementById('rep-kpi-total-note').textContent = `Casos únicos registrados · ${reportMonthLabel(monthKey)}`;
+        document.getElementById('rep-kpi-resueltos').textContent = String(resolved.length);
+        document.getElementById('rep-kpi-resueltos-note').textContent = `Con fecha de resolución en ${reportMonthLabel(monthKey)}`;
+        document.getElementById('rep-kpi-abiertos').textContent = String(open.length);
         document.getElementById('rep-kpi-tiempo').textContent =
-            formatReportDuration(reportMeanElapsedHours(closed, 'sla_resolved_at'));
+            formatReportDuration(reportMeanElapsedHours(resolved, 'reportResolvedAt'));
         document.getElementById('rep-kpi-primera-atencion').textContent =
-            formatReportDuration(reportMeanElapsedHours(tickets.filter(ticket => ticket.sla_first_response_at), 'sla_first_response_at'));
+            formatReportDuration(reportMeanElapsedHours(tickets.filter(ticket => reportTimestamp(ticket.sla_first_response_at) > 0), 'sla_first_response_at'));
         renderReportBars('repCategoriasList', aggregateReportTickets(tickets, 'categoria_reporte', 'Sin categoría'), true);
         renderReportBars('repOficinasList', aggregateReportTickets(tickets, 'oficina_nombre', 'Sin oficina'));
         renderReportBars('repTecnicosList', aggregateReportTickets(tickets, 'tecnico', 'Sin asignar'));
@@ -3280,7 +3758,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const tickets = (window.allTickets || [])
             .filter(ticket => !isClosedReportTicket(ticket))
             .map(ticket => ({ ...ticket, summaryType: 'ticket' }));
+        const ticketIds = new Set((window.allTickets || []).map(ticket => Number(ticket.id)));
         const accounts = accountIncidences
+            .filter(incident => !incident.ticket_id || !ticketIds.has(Number(incident.ticket_id)))
             .filter(incident => incident.estado !== 'RESUELTO')
             .map(incident => ({
                 ...incident,
@@ -3346,35 +3826,35 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderSupportSummary() {
-        if (!summaryMonthSelect) return;
+        if (!canListAllTickets || !summaryMonthSelect) return;
         const monthKey = summaryMonthSelect.value || currentReportMonth();
         const tickets = getReportTicketsForMonth(monthKey);
-        const closed = tickets.filter(isClosedReportTicket);
-        const open = tickets.length - closed.length;
-        const rate = tickets.length ? Math.round(closed.length * 100 / tickets.length) : 0;
-        const duration = reportMeanElapsedHours(closed, 'sla_resolved_at');
+        const closed = getReportResolvedTickets(monthKey);
+        const open = tickets.filter(ticket => !isClosedReportTicket(ticket));
+        const progress = tickets.length ? Math.min(100, Math.round(closed.length * 100 / tickets.length)) : 0;
+        const duration = reportMeanElapsedHours(closed, 'reportResolvedAt');
         const firstResponse = reportMeanElapsedHours(
-            tickets.filter(ticket => ticket.sla_first_response_at),
+            tickets.filter(ticket => reportTimestamp(ticket.sla_first_response_at) > 0),
             'sla_first_response_at'
         );
 
         document.getElementById('summaryTotal').textContent = String(tickets.length);
         document.getElementById('summaryResolved').textContent = String(closed.length);
-        document.getElementById('summaryResolvedRate').textContent = `${rate}% de las incidencias del mes`;
-        document.getElementById('summaryOpen').textContent = String(open);
+        document.getElementById('summaryResolvedRate').textContent = `Resueltos durante ${reportMonthLabel(monthKey)}`;
+        document.getElementById('summaryOpen').textContent = String(open.length);
         document.getElementById('summaryResolutionTime').textContent = formatReportDuration(duration);
-        document.getElementById('supportProgressRate').textContent = `${rate}%`;
+        document.getElementById('supportProgressRate').textContent = String(closed.length);
         document.getElementById('supportProgressResolved').textContent = String(closed.length);
-        document.getElementById('supportProgressOpen').textContent = String(open);
+        document.getElementById('supportProgressOpen').textContent = String(open.length);
         const ring = document.getElementById('supportProgressRing');
-        ring.style.setProperty('--progress', `${rate}%`);
-        ring.setAttribute('aria-label', `${rate}% de incidencias resueltas`);
+        ring.style.setProperty('--progress', `${progress}%`);
+        ring.setAttribute('aria-label', `${closed.length} casos resueltos durante ${reportMonthLabel(monthKey)}`);
         document.getElementById('supportFirstResponse').textContent =
             `Tiempo medio de primera atención: ${formatReportDuration(firstResponse)}.`;
         document.getElementById('frequentFailuresCaption').textContent =
             `Incidencias por categoría · ${reportMonthLabel(monthKey)}`;
         document.getElementById('frequentFailuresTotal').textContent =
-            `${tickets.length} ${tickets.length === 1 ? 'caso' : 'casos'}`;
+            `${tickets.length} ${tickets.length === 1 ? 'caso registrado' : 'casos registrados'}`;
 
         const iconForCategory = label => {
             const normalized = String(label)
@@ -3399,7 +3879,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         const failures = document.getElementById('frequentFailuresList');
         failures.replaceChildren();
-        const categories = aggregateReportTickets(tickets, 'categoria_reporte', 'Sin categoría');
+        const categories = window.ReportMetrics.aggregateCategories(tickets);
         if (!categories.length) {
             const empty = document.createElement('p');
             empty.className = 'text-muted';
@@ -3447,6 +3927,28 @@ document.addEventListener('DOMContentLoaded', () => {
         return getReportTickets();
     }
 
+    function openDashboardCategory(category) {
+        if (!canViewReports) return;
+        if (searchTimeout) clearTimeout(searchTimeout);
+        const monthKey = summaryMonthSelect?.value || reportMonthSelect?.value || currentReportMonth();
+        dashboardCategoryFilter = { category, monthKey };
+        window.estadoFiltroActual = '';
+        window.paginaActual = 1;
+        const searchInput = document.getElementById('searchInput');
+        if (searchInput) searchInput.value = '';
+        document.querySelectorAll('.filter-btn').forEach((button, index) =>
+            button.classList.toggle('active', index === 0)
+        );
+        const accountsCard = document.querySelector('.account-incidents-card');
+        if (accountsCard) accountsCard.hidden = true;
+        window.cambiarVista('tickets');
+        window.aplicarFiltros();
+    }
+
+    document.getElementById('clearDashboardCategoryFilter')?.addEventListener('click', () => {
+        window.limpiarFiltros();
+    });
+
     summaryMonthSelect?.addEventListener('change', () => {
         if (reportMonthSelect) reportMonthSelect.value = summaryMonthSelect.value;
         renderSupportSummary();
@@ -3454,6 +3956,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     cargarMetricasReportes = function() {
+        if (!canViewReports) return;
         prepareReportMonths();
         if (summaryMonthSelect) {
             const options = [...reportMonthSelect.options].map(option =>
@@ -3498,17 +4001,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('frequentFailuresList')?.addEventListener('click', event => {
         const button = event.target.closest('[data-summary-category]');
         if (!button) return;
-        const category = button.dataset.summaryCategory;
-        if (category === 'Cuentas institucionales') {
-            window.cambiarVista('tickets');
-            document.getElementById('accountIncidentsList')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            return;
-        }
-        const searchInput = document.getElementById('searchInput');
-        if (!searchInput) return;
-        window.cambiarVista('tickets');
-        searchInput.value = category;
-        searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+        openDashboardCategory(button.dataset.summaryCategory);
     });
 
     document.getElementById('summaryOpenCasesList')?.addEventListener('click', event => {
@@ -3534,25 +4027,27 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     window.exportarTicketsExcel = function() {
+        if (!canViewReports) return;
         const monthKey = reportMonthSelect?.value || currentReportMonth();
         const tickets = getReportTickets();
         if (!tickets.length) {
             mostrarMensaje('No hay tickets registrados en el mes seleccionado', 'error');
             return;
         }
-        const closed = tickets.filter(isClosedReportTicket);
+        const resolved = getReportResolvedTickets(monthKey);
+        const open = tickets.filter(ticket => !isClosedReportTicket(ticket));
         const rows = [
             ['Reporte mensual de soporte UTEA', reportMonthLabel(monthKey)],
-            ['Incidencias registradas', tickets.length],
-            ['Casos resueltos', closed.length],
-            ['Casos abiertos', tickets.length - closed.length],
-            ['Tasa de resolución', `${Math.round(closed.length * 100 / tickets.length)}%`],
+            ['Casos únicos registrados durante el mes', tickets.length],
+            ['Casos resueltos durante el mes', resolved.length],
+            ['Casos registrados este mes que siguen abiertos', open.length],
+            ['Tiempo medio de resolución en el mes', formatReportDuration(reportMeanElapsedHours(resolved, 'reportResolvedAt'))],
             [],
-            ['ID', 'Asunto', 'Solicitante', 'Oficina', 'Categoría', 'Técnico', 'Prioridad', 'Estado', 'Fecha de registro'],
+            ['Ticket / cuenta vinculados', 'Asunto', 'Solicitante', 'Oficina', 'Categoría', 'Técnico', 'Prioridad', 'Estado', 'Fecha de registro'],
             ...tickets.map(ticket => [
-                ticket.id, ticket.titulo, ticket.solicitante_nombre || ticket.username,
+                ticket.reportReference || `#${ticket.id}`, ticket.titulo, ticket.solicitante_nombre || ticket.username,
                 ticket.oficina_nombre, ticket.categoria_nombre, ticket.tecnico,
-                ticket.prioridad, ticket.estado, ticket.fecha_creacion
+                ticket.prioridad, ticket.estado, new Date(reportTimestamp(ticket.fecha_creacion)).toLocaleString('es-PE', { timeZone: 'America/Lima' })
             ])
         ];
         const csv = `\uFEFF${rows.map(row => row.map(reportCsvCell).join(',')).join('\r\n')}`;
@@ -3565,17 +4060,19 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     window.generarReportePDFMensual = function() {
+        if (!canViewReports) return;
         const monthKey = reportMonthSelect?.value || currentReportMonth();
         const tickets = getReportTickets();
+        const resolved = getReportResolvedTickets(monthKey);
+        const open = tickets.filter(ticket => !isClosedReportTicket(ticket));
         const printWindow = window.open('', '_blank');
         if (!printWindow) {
             mostrarMensaje('Permite las ventanas emergentes para generar el reporte PDF', 'error');
             return;
         }
-        const closed = tickets.filter(isClosedReportTicket);
         const ticketRows = tickets.map(ticket => `
             <tr>
-                <td>#${escapeHTML(ticket.id)}</td>
+                <td>${escapeHTML(ticket.reportReference || `#${ticket.id}`)}</td>
                 <td>${escapeHTML(ticket.solicitante_nombre || ticket.username || '—')}</td>
                 <td>${escapeHTML(ticket.categoria_nombre || 'Sin categoría')}</td>
                 <td>${escapeHTML(ticket.titulo || 'Sin asunto')}</td>
@@ -3599,10 +4096,10 @@ document.addEventListener('DOMContentLoaded', () => {
             <header><h1>Universidad Tecnológica de los Andes</h1>
             <p>Reporte mensual de soporte · Sede Andahuaylas · ${escapeHTML(reportMonthLabel(monthKey))}</p></header>
             <div class="kpis">
-                <div class="kpi"><span>Incidencias del mes</span><strong>${tickets.length}</strong></div>
-                <div class="kpi"><span>Casos resueltos</span><strong>${closed.length}</strong></div>
-                <div class="kpi"><span>Casos abiertos</span><strong>${tickets.length - closed.length}</strong></div>
-                <div class="kpi"><span>Tasa de resolución</span><strong>${tickets.length ? Math.round(closed.length * 100 / tickets.length) : 0}%</strong></div>
+                <div class="kpi"><span>Casos únicos registrados</span><strong>${tickets.length}</strong></div>
+                <div class="kpi"><span>Casos resueltos durante el mes</span><strong>${resolved.length}</strong></div>
+                <div class="kpi"><span>Registrados en el mes que siguen abiertos</span><strong>${open.length}</strong></div>
+                <div class="kpi"><span>Tiempo medio de resolución del mes</span><strong>${escapeHTML(formatReportDuration(reportMeanElapsedHours(resolved, 'reportResolvedAt')))}</strong></div>
             </div>
             <h2>Detalle de incidencias</h2>
             <table><thead><tr><th>ID</th><th>Solicitante</th><th>Categoría</th><th>Asunto</th><th>Prioridad</th><th>Estado</th><th>Registro</th></tr></thead>
@@ -3626,17 +4123,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     obtenerTickets();
     cargarIncidenciasCuentas();
-    if (puedeGestionarCuentas) cargarEstadisticasCuentas();
     cargarTecnicos();
     cargarNotificaciones();
-    cargarMetricasReportes();
 
     // Refrescar notificaciones cada 30 segundos
     setInterval(cargarNotificaciones, 30000);
 
     // --- Socket.io Notificaciones en Tiempo Real ---
     if (typeof io !== 'undefined' && token) {
-        const socket = io('http://localhost:3000', {
+        const socket = io(window.location.origin, {
             auth: { token: token }
         });
         socket.on('nueva_notificacion', (data) => {
@@ -3657,7 +4152,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!grid) return;
         
         try {
-            const res = await fetch('http://localhost:3000/api/diagnosticos/auto', {
+            const res = await fetch('/api/diagnosticos/auto', {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (!res.ok) throw new Error('Error cargando base');
@@ -3751,4 +4246,5 @@ document.addEventListener('DOMContentLoaded', () => {
         baseSearchTimer = setTimeout(() => cargarBaseConocimiento(e.target.value), 300);
     });
 
-});
+    });
+}

@@ -1,4 +1,9 @@
-require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') });
+if (process.env.UTEA_TEST_DB_ALLOW_INTEGRATION === '1' && !/_test$/i.test(process.env.DB_NAME || '')) {
+    throw new Error('Las pruebas de integración solo pueden conectar a una base cuyo nombre termine en _test');
+}
+if (process.env.UTEA_TEST_DB_ALLOW_INTEGRATION !== '1') {
+    require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') });
+}
 const mysql = require('mysql2');
 
 const connection = mysql.createConnection({

@@ -168,6 +168,106 @@ router.patch('/usuarios/:id/rol', verificarToken, verificarRol('admin', 'superad
     });
 });
 
+router.get('/me', verificarToken, (req, res) => {
+    res.json({
+        id: req.user.id,
+        username: req.user.username,
+        rol: req.user.rol
+    });
+});
+
+router.get('/me/profile', verificarToken, (req, res) => {
+    db.query(`SELECT u.id, u.username, u.rol, u.nombre_completo, u.correo_institucional,
+                     o.nombre AS oficina_nombre
+              FROM usuarios u
+              LEFT JOIN oficinas o ON o.id = u.oficina_id
+              WHERE u.id = ?`, [req.user.id], (err, results) => {
+        if (err) {
+            console.error('Error obteniendo el perfil del usuario:', err.message);
+            return res.status(500).json({ error: 'Error obteniendo el perfil' });
+        }
+        if (!results.length) return res.status(404).json({ error: 'Usuario no encontrado' });
+        res.json(results[0]);
+    });
+});
+
+router.put('/me/profile', verificarToken, (req, res) => {
+    const profile = req.body;
+    const allowedFields = ['nombre_completo', 'correo_institucional'];
+    if (!profile || typeof profile !== 'object' || Array.isArray(profile) ||
+        !Object.hasOwn(profile, 'nombre_completo') ||
+        !Object.hasOwn(profile, 'correo_institucional') ||
+        Object.keys(profile).some(field => !allowedFields.includes(field))) {
+        return res.status(400).json({ error: 'Debes enviar nombre completo y correo institucional para actualizar el perfil' });
+    }
+
+    const updates = [];
+    const values = [];
+    if (Object.hasOwn(profile, 'nombre_completo')) {
+        if (typeof profile.nombre_completo !== 'string') {
+            return res.status(400).json({ error: 'El nombre completo no es válido' });
+        }
+        const nombre = profile.nombre_completo.trim();
+        if (!nombre || nombre.length > 150) {
+            return res.status(400).json({ error: 'El nombre completo es obligatorio y debe tener como máximo 150 caracteres' });
+        }
+        updates.push('nombre_completo = ?');
+        values.push(nombre);
+    }
+    if (Object.hasOwn(profile, 'correo_institucional')) {
+        if (typeof profile.correo_institucional !== 'string') {
+            return res.status(400).json({ error: 'El correo institucional no es válido' });
+        }
+        const correo = profile.correo_institucional.trim().toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo) || correo.length > 254) {
+            return res.status(400).json({ error: 'El correo institucional no es válido' });
+        }
+        updates.push('correo_institucional = ?');
+        values.push(correo);
+    }
+
+    values.push(req.user.id);
+    db.query(`UPDATE usuarios SET ${updates.join(', ')} WHERE id = ?`, values, (err, result) => {
+        if (err) {
+            if (err.code === 'ER_DUP_ENTRY') {
+                return res.status(409).json({ error: 'El correo institucional ya está registrado' });
+            }
+            console.error('Error actualizando el perfil del usuario:', err.message);
+            return res.status(500).json({ error: 'Error actualizando el perfil' });
+        }
+        res.json({ mensaje: 'Perfil actualizado correctamente' });
+    });
+});
+
+router.patch('/me/password', verificarToken, async (req, res) => {
+    const { current_password, new_password } = req.body || {};
+    if (Object.keys(req.body || {}).some(field => !['current_password', 'new_password'].includes(field))) {
+        return res.status(400).json({ error: 'La solicitud contiene campos no permitidos' });
+    }
+    if (typeof current_password !== 'string' || !current_password ||
+        typeof new_password !== 'string' || !new_password) {
+        return res.status(400).json({ error: 'La contraseña actual y la nueva son obligatorias' });
+    }
+    if (new_password.length < 6) {
+        return res.status(400).json({ error: 'La nueva contraseña debe tener al menos 6 caracteres' });
+    }
+
+    try {
+        const [users] = await db.promise().query('SELECT password FROM usuarios WHERE id = ?', [req.user.id]);
+        if (!users.length) return res.status(404).json({ error: 'Usuario no encontrado' });
+        if (!(await bcrypt.compare(current_password, users[0].password))) {
+            return res.status(400).json({ error: 'La contraseña actual es incorrecta' });
+        }
+        const hashedPassword = await bcrypt.hash(new_password, 10);
+        const [result] = await db.promise().query('UPDATE usuarios SET password = ? WHERE id = ?', [hashedPassword, req.user.id]);
+        if (!result.affectedRows) return res.status(404).json({ error: 'Usuario no encontrado' });
+        res.json({ mensaje: 'Contraseña actualizada correctamente' });
+    } catch (error) {
+        console.error('Error actualizando la contraseña del usuario:', error.message);
+        res.status(500).json({ error: 'Error actualizando la contraseña' });
+    }
+});
+
 //eliminar usuario, solo admin
 router.delete('/usuarios/:id', verificarToken, verificarRol('admin'), (req, res) => {
     const { id } = req.params;

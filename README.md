@@ -114,7 +114,18 @@ npm start
 
 El servidor corre en `http://localhost:3000`. En PowerShell, crea la configuracion local con `Copy-Item .env.example .env` antes de editar las credenciales.
 
-Las migraciones crean el esquema legacy cuando la base esta vacia y luego agregan oficinas, categorias, asignaciones de tecnicos y campos de clasificacion en tickets. Los campos nuevos de tickets son nullable para conservar solicitudes previas. En bases existentes, `CREATE TABLE IF NOT EXISTS` conserva las tablas y datos actuales; aun asi, realiza un respaldo y valida el esquema antes de migrar produccion.
+Las migraciones crean el esquema cuando la base esta vacia y agregan cambios versionados sin renumerar archivos anteriores. El migrador se detiene si encuentra tablas de la aplicacion sin un historial `schema_migrations` utilizable; no vuelve a ejecutar alteraciones historicas sobre una base existente sin trazabilidad. La migracion `023_idempotencia_y_relaciones_cuentas.sql` agrega claves idempotentes y una relacion opcional de trazabilidad `incidencias_cuentas.ticket_id`; las incidencias de cuentas siguen siendo registros independientes y al borrar su ticket asociado la referencia queda en `NULL`, sin borrar ni resolver la incidencia.
+
+### Migraciones y adopcion de bases existentes
+
+- En una base nueva, crea una base vacia y ejecuta `npm run db:migrate`.
+- Antes de actualizar una base existente, crea y verifica un respaldo y ensaya la actualizacion sobre una copia aislada.
+- Si la base existente no tiene historial, compara su esquema con cada archivo de `database/migrations/`. Solo despues de confirmar que una migracion esta completamente aplicada, registra su nombre exacto en `schema_migrations`; no marques como aplicada una migracion parcialmente ejecutada ni insertes todas las versiones a ciegas. Luego ejecuta `npm run db:migrate` para aplicar las versiones pendientes.
+- Si el historial tiene huecos, revisa y reconcilia manualmente el esquema y el historial en la copia; el migrador rechaza continuar fuera de orden.
+- Antes de `023`, corrige en la copia cualquier `incidencias_cuentas.ticket_id` que no apunte a un ticket existente. El migrador comprueba referencias huérfanas antes de añadir la clave foránea.
+- No edites ni renombres migraciones ya aplicadas. Para cambios futuros, agrega una nueva migracion con version consecutiva.
+
+Para las pruebas de integracion, usa exclusivamente un esquema desechable cuyo nombre termine en `_test`; define `UTEA_TEST_DB_ALLOW_INTEGRATION=1` y las variables `UTEA_TEST_DB_HOST`, `UTEA_TEST_DB_PORT`, `UTEA_TEST_DB_USER`, `UTEA_TEST_DB_PASSWORD` y `UTEA_TEST_DB_NAME`, y ejecuta `npm run test:integration`. El proceso de prueba no carga `.env`, exige el sufijo `_test` y no envia notificaciones reales.
 
 ## Configuración de Variables de Entorno
 
@@ -139,6 +150,12 @@ En produccion, configura un usuario MySQL dedicado con permisos limitados y reem
 |--------|----------|-------------|------|
 | POST | `/api/auth/register` | Registrar usuario | No |
 | POST | `/api/auth/login` | Iniciar sesión | No |
+| GET | `/api/auth/me` | Obtener la identidad y el rol vigentes | JWT |
+| GET | `/api/auth/me/profile` | Consultar el perfil propio | JWT |
+| PUT | `/api/auth/me/profile` | Actualizar nombre completo y correo institucional propios | JWT |
+| PATCH | `/api/auth/me/password` | Cambiar la contraseña verificando la actual | JWT |
+
+Los endpoints de perfil usan exclusivamente la identidad autenticada; no aceptan identificadores de usuario ni permiten cambiar rol, permisos u oficina. El nombre completo debe tener hasta 150 caracteres y el correo institucional debe ser válido y único. La nueva contraseña debe tener al menos 6 caracteres.
 
 ### Catalogos institucionales
 Todos los endpoints requieren JWT. Las operaciones de escritura requieren rol `admin`.
@@ -163,7 +180,7 @@ Todos los endpoints requieren JWT. Las operaciones de escritura requieren rol `a
 | PUT | `/api/tickets/:id` | Editar ticket (título, descripción, estado, técnico) | Admin |
 | DELETE | `/api/tickets/:id` | Eliminar ticket | Admin |
 
-El formulario requiere nombre del solicitante, código universitario o DNI, tipo de usuario, oficina y categoría. La API mantiene esos campos como opcionales para permitir clientes antiguos; cuando se envía una clasificación, oficina y categoría son obligatorias en conjunto y deben estar activas y relacionadas. `ubicacion` es opcional.
+El formulario y la API requieren nombre del solicitante, código universitario o DNI, tipo de solicitante, carrera, categoría de soporte, bloque, ambiente, impacto y urgencia. La oficina y categoría institucional son obligatorias, deben estar activas y pertenecer entre sí; el ambiente debe corresponder al bloque y el número de aula solo se solicita para salones/aulas. Las solicitudes POST requieren un encabezado `Idempotency-Key`; conserva la misma clave al reintentar la misma solicitud.
 
 Campos adicionales aceptados por `POST /api/tickets`: `oficina_id`, `categoria_id`, `ubicacion`, `solicitante_nombre`, `codigo_universitario_dni` y `tipo_solicitante` (`estudiante`, `docente` o `administrativo`).
 

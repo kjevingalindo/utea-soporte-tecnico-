@@ -28,21 +28,25 @@
             <nav class="sidebar-nav">
                 <a href="#" class="nav-item active" data-view="dashboard">
                     <i class="ph ph-squares-four"></i>
-                    <span>Dashboard</span>
+                    <span id="homeNavLabel">Dashboard</span>
                 </a>
                 <a href="#" class="nav-item" data-view="tickets">
                     <i class="ph ph-kanban"></i>
-                    <span>Tickets</span>
+                    <span id="ticketsNavLabel">Tickets</span>
                 </a>
-                <a href="#" class="nav-item" data-view="reportes">
+                <a href="#" class="nav-item" data-view="perfil" id="profileNav" hidden>
+                    <i class="ph ph-user-circle"></i>
+                    <span>Mi perfil</span>
+                </a>
+                <a href="#" class="nav-item" data-view="reportes" hidden>
                     <i class="ph ph-chart-line-up"></i>
                     <span>Reporte mensual</span>
                 </a>
-                <a href="#" class="nav-item" data-view="admin">
+                <a href="#" class="nav-item" data-view="admin" hidden>
                     <i class="ph ph-shield-check"></i>
                     <span>Administración</span>
                 </a>
-                <a href="#" class="nav-item" data-view="configuracion">
+                <a href="#" class="nav-item" data-view="configuracion" hidden>
                     <i class="ph ph-gear-six"></i>
                     <span>Configuración</span>
                 </a>
@@ -66,7 +70,7 @@
                         <i class="ph ph-moon"></i>
                     </button>
                     <button type="button" class="btn-create-ticket py-1.5 px-3 text-sm flex items-center" id="quickTicketOpen" aria-haspopup="dialog" aria-controls="quickTicketModal">
-                        <i class="ph ph-plus" aria-hidden="true"></i> Nuevo Ticket
+                        <i class="ph ph-plus" aria-hidden="true"></i> <span id="quickTicketLabel">Nuevo Ticket</span>
                     </button>
                     <div class="notifications" id="notificationToggle">
                         <i class="ph ph-bell"></i>
@@ -97,6 +101,7 @@
                 
                 <!-- VIEW: DASHBOARD -->
                 <section id="view-dashboard" class="view-section active">
+                    <div id="staffDashboardContent" hidden>
                     <div class="utea-banner">
                         <div class="utea-banner-overlay"></div>
                         <div class="utea-banner-content">
@@ -144,7 +149,7 @@
                         </div>
                     </div>
 
-                    <section class="support-summary" aria-labelledby="supportSummaryTitle">
+                    <section id="supportSummarySection" class="support-summary" aria-labelledby="supportSummaryTitle" hidden>
                         <div class="support-summary-heading">
                             <div>
                                 <span class="support-summary-eyebrow">UTEA · ANDAHUAYLAS</span>
@@ -165,7 +170,7 @@
                             <article class="summary-kpi-card">
                                 <span><i class="ph ph-check-circle"></i> Casos resueltos</span>
                                 <strong id="summaryResolved">0</strong>
-                                <small id="summaryResolvedRate">0% del periodo</small>
+                                <small id="summaryResolvedRate">Resueltos durante el periodo</small>
                             </article>
                             <article class="summary-kpi-card">
                                 <span><i class="ph ph-inbox"></i> Casos por atender</span>
@@ -210,12 +215,12 @@
                                 <div class="support-progress-ring" id="supportProgressRing" role="img" aria-label="0% de incidencias resueltas">
                                     <div>
                                         <strong id="supportProgressRate">0%</strong>
-                                        <span>resuelto</span>
+                                        <span>resueltos en el mes</span>
                                     </div>
                                 </div>
                                 <div class="support-progress-counts">
-                                    <div><span>Resueltos</span><strong id="supportProgressResolved">0</strong></div>
-                                    <div><span>Por atender</span><strong id="supportProgressOpen">0</strong></div>
+                                    <div><span>Resueltos este mes</span><strong id="supportProgressResolved">0</strong></div>
+                                    <div><span>Abiertos de los registrados este mes</span><strong id="supportProgressOpen">0</strong></div>
                                 </div>
                                 <p id="supportFirstResponse">Tiempo de primera atención: sin datos.</p>
                             </aside>
@@ -313,6 +318,48 @@
                             <p class="text-muted">Cargando incidencias...</p>
                         </div>
                     </section>
+                    </div>
+
+                    <section id="requesterDashboardContent" hidden>
+                        <div class="greeting-section" style="margin-bottom:24px;">
+                            <h2 style="margin:0 0 4px; font-size:1.6rem; font-weight:600;">Tu actividad</h2>
+                            <p style="margin:0; color:var(--text-secondary);">Consulta el estado y las últimas novedades de tus tickets.</p>
+                        </div>
+                        <div class="kpi-grid">
+                            <div class="kpi-card">
+                                <div class="kpi-icon" style="background:#e0f2fe; color:#0284c7;"><i class="ph-fill ph-ticket"></i></div>
+                                <div class="kpi-data"><h3>Mis tickets</h3><p id="personal-kpi-total">0</p></div>
+                            </div>
+                            <div class="kpi-card">
+                                <div class="kpi-icon" style="background:#fef3c7; color:#d97706;"><i class="ph-fill ph-clock"></i></div>
+                                <div class="kpi-data"><h3>En atención</h3><p id="personal-kpi-active">0</p></div>
+                            </div>
+                            <div class="kpi-card">
+                                <div class="kpi-icon" style="background:#dcfce7; color:#16a34a;"><i class="ph-fill ph-check-circle"></i></div>
+                                <div class="kpi-data"><h3>Finalizados</h3><p id="personal-kpi-resolved">0</p></div>
+                            </div>
+                        </div>
+                        <div id="personalEmptyState" class="widget-card" hidden role="status">
+                            <div style="padding:28px 16px; text-align:center;">
+                                <i class="ph ph-ticket" style="font-size:2rem; color:var(--action-primary);"></i>
+                                <h3 style="margin:8px 0;">Todavía no tienes tickets</h3>
+                                <p class="text-muted">Cuando envíes una solicitud, aquí verás su estado y las novedades.</p>
+                                <button type="button" class="btn-create-ticket" id="personalEmptyNewTicket">
+                                    <i class="ph ph-plus" aria-hidden="true"></i> Crear nuevo ticket
+                                </button>
+                            </div>
+                        </div>
+                        <div id="personalDashboardLists" class="dashboard-widgets">
+                            <section class="widget-card">
+                                <div class="widget-header"><h3>Mis tickets recientes</h3></div>
+                                <div id="personalRecentTickets" class="recent-activity" aria-live="polite"></div>
+                            </section>
+                            <section class="widget-card">
+                                <div class="widget-header"><h3>Actualizaciones recientes</h3></div>
+                                <div id="personalRecentUpdates" class="recent-activity" aria-live="polite"></div>
+                            </section>
+                        </div>
+                    </section>
                 </section>
 
                 <!-- VIEW: TICKETS -->
@@ -323,6 +370,9 @@
                             <button class="filter-btn" onclick="filtrar('activos', event)">En atención <span class="count" id="count-activos">0</span></button>
                             <button class="filter-btn" onclick="filtrar('finalizados', event)">Finalizados <span class="count" id="count-finalizados">0</span></button>
                         </div>
+                        <button type="button" class="btn-create-ticket" id="ticketsNewRequestButton">
+                            <i class="ph ph-plus" aria-hidden="true"></i> Nuevo ticket
+                        </button>
                     </div>
 
                     <section class="widget-card account-incidents-card" aria-labelledby="accountIncidentsTitle">
@@ -338,17 +388,16 @@
                         </div>
                     </section>
 
+                    <section id="dashboardCategoryFilter" class="ticket-category-filter" hidden aria-live="polite">
+                        <div>
+                            <strong id="dashboardCategoryFilterLabel"></strong>
+                            <span id="dashboardCategoryFilterCount"></span>
+                        </div>
+                        <button type="button" class="btn-small" id="clearDashboardCategoryFilter">Limpiar filtros</button>
+                    </section>
+
                     <section class="table-container">
-                        <div class="table-header">
-                            <div class="col-checkbox"><input type="checkbox"></div>
-                            <div class="col-id">ID <i class="ph-fill ph-caret-up-down"></i></div>
-                            <div class="col-date">ACTUALIZADO <i class="ph-fill ph-caret-up-down"></i></div>
-                            <div class="col-name">NOMBRE <i class="ph-fill ph-caret-up-down"></i></div>
-                            <div class="col-subject">ASUNTO <i class="ph-fill ph-caret-up-down"></i></div>
-                            <div class="col-status">ESTADO <i class="ph-fill ph-caret-up-down"></i></div>
-                            <div class="col-replier">ÚLT. RESPUESTA <i class="ph-fill ph-caret-up-down"></i></div>
-                            <div class="col-priority">PRIORIDAD <i class="ph-fill ph-caret-up-down"></i></div>
-                            <div class="col-actions"></div>
+                        <div class="table-header" id="ticketsTableHeader">
                         </div>
                         
                         <div id="tickets" class="tickets-table-body">
@@ -369,8 +418,58 @@
                     </section>
                 </section>
 
+                <!-- VIEW: PERFIL -->
+                <section id="view-perfil" class="view-section" hidden>
+                    <div class="page-heading" style="margin-bottom:20px;">
+                        <h2>Mi perfil</h2>
+                        <p class="text-muted">Consulta y actualiza tus datos personales.</p>
+                    </div>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <section class="widget-card">
+                            <div class="widget-header"><h3>Datos personales</h3></div>
+                            <form id="profileForm" class="profile-form">
+                                <div class="form-group">
+                                    <label for="profileUsername">Usuario</label>
+                                    <input id="profileUsername" class="modal-input" type="text" readonly>
+                                </div>
+                                <div class="form-group">
+                                    <label for="profileRole">Tipo de cuenta</label>
+                                    <input id="profileRole" class="modal-input" type="text" readonly>
+                                </div>
+                                <div class="form-group">
+                                    <label for="profileOffice">Oficina</label>
+                                    <input id="profileOffice" class="modal-input" type="text" readonly>
+                                </div>
+                                <div class="form-group">
+                                    <label for="profileFullName">Nombre completo</label>
+                                    <input id="profileFullName" name="nombre_completo" class="modal-input" type="text" maxlength="150" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="profileEmail">Correo institucional</label>
+                                    <input id="profileEmail" name="correo_institucional" class="modal-input" type="email" maxlength="254" required>
+                                </div>
+                                <button type="submit" class="btn-primary">Guardar perfil</button>
+                            </form>
+                        </section>
+                        <section class="widget-card">
+                            <div class="widget-header"><h3>Cambiar contraseña</h3></div>
+                            <form id="profilePasswordForm" class="profile-form">
+                                <div class="form-group">
+                                    <label for="profileCurrentPassword">Contraseña actual</label>
+                                    <input id="profileCurrentPassword" name="current_password" class="modal-input" type="password" autocomplete="current-password" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="profileNewPassword">Nueva contraseña</label>
+                                    <input id="profileNewPassword" name="new_password" class="modal-input" type="password" minlength="6" autocomplete="new-password" required>
+                                </div>
+                                <button type="submit" class="btn-primary">Actualizar contraseña</button>
+                            </form>
+                        </section>
+                    </div>
+                </section>
+
                 <!-- VIEW: ADMINISTRACION -->
-                <section id="view-admin" class="view-section">
+                <section id="view-admin" class="view-section" hidden>
                     <div class="kpi-grid" style="margin-bottom:24px;">
                         <div class="kpi-card">
                             <div class="kpi-icon" style="background:#e0f2fe; color:#0284c7;"><i class="ph-fill ph-users"></i></div>
@@ -531,7 +630,7 @@
                     </div>
                 </section>
 
-                <section id="view-configuracion" class="view-section">
+                <section id="view-configuracion" class="view-section" hidden>
                     <div class="page-heading">
                         <h2>Configuración</h2>
                     </div>
@@ -575,7 +674,7 @@
                 </section>
 
                 <!-- VIEW: CLIENTES -->
-                <section id="view-clientes" class="view-section">
+                <section id="view-clientes" class="view-section" hidden>
                     <div class="kpi-grid" style="margin-bottom:24px;">
                         <div class="kpi-card">
                             <div class="kpi-icon" style="background:#e0f2fe; color:#0284c7;"><i class="ph-fill ph-users"></i></div>
@@ -652,7 +751,7 @@
                 </section>
 
                 <!-- VIEW: REPORTES -->
-                <section id="view-reportes" class="view-section">
+                <section id="view-reportes" class="view-section" hidden>
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
                         <div>
                             <h2 style="margin:0; font-size:1.4rem; font-weight:700;">Reporte mensual de soporte</h2>
@@ -678,9 +777,9 @@
                         <div class="kpi-card">
                             <div class="kpi-icon" style="background:#dcfce7; color:#16a34a;"><i class="ph-fill ph-check-circle"></i></div>
                             <div class="kpi-data">
-                                <h3>Casos resueltos</h3>
+                                <h3>Casos resueltos en el mes</h3>
                                 <p id="rep-kpi-resueltos">0</p>
-                                <small id="rep-kpi-resueltos-note">0% de los registrados</small>
+                                <small id="rep-kpi-resueltos-note">Según fecha de resolución</small>
                             </div>
                         </div>
                         <div class="kpi-card">
@@ -688,7 +787,7 @@
                             <div class="kpi-data">
                                 <h3>Casos abiertos</h3>
                                 <p id="rep-kpi-abiertos">0</p>
-                                <small>Pendientes, en atención y en espera</small>
+                                <small>De los registrados este mes, siguen abiertos</small>
                             </div>
                         </div>
                         <div class="kpi-card">
@@ -785,7 +884,7 @@
                 </section>
 
                 <!-- VIEW: PLANTILLAS RÁPIDAS -->
-                <section id="view-plantillas" class="view-section">
+                <section id="view-plantillas" class="view-section" hidden>
                     <div class="dashboard-widgets" style="grid-template-columns: 1fr;">
                         <div class="widget-card">
                             <div class="widget-header">
@@ -808,7 +907,7 @@
                 </section>
 
                 <!-- VIEW: INTEGRACIONES -->
-                <section id="view-integraciones" class="view-section">
+                <section id="view-integraciones" class="view-section" hidden>
                     <div class="kpi-grid">
                         <div class="kpi-card" style="justify-content:space-between;">
                             <div style="display:flex; align-items:center; gap:16px;">
@@ -834,7 +933,7 @@
                 </section>
 
                 <!-- VIEW: AJUSTES -->
-                <section id="view-ajustes" class="view-section">
+                <section id="view-ajustes" class="view-section" hidden>
                     <div class="widget-card">
                         <h3>Ajustes del Sistema</h3>
                         <p style="color:var(--text-secondary); margin-bottom:24px;">Configura las preferencias generales de AuraDesk.</p>
@@ -1185,8 +1284,9 @@
 
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
     <script src="messages.js"></script>
+    <script src="accessControl.js"></script>
+    <script src="js/ticketTable.js"></script>
     <script src="app.js"></script>
-    <script src="dashboard.js"></script>
     <script src="authCheck.js"></script>
     <script type="module" src="js/main.js"></script>
 

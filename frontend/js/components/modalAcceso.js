@@ -1,11 +1,4 @@
 (function exposeModalAcceso(global) {
-    const OFFICIAL_PLATFORMS = [
-        { nombre: 'Google Classroom', etiqueta: 'Google Classroom' },
-        { nombre: 'ERP University UTEA', etiqueta: 'ERP University UTEA' },
-        { nombre: 'Gmail Institucional', etiqueta: 'Correo institucional' },
-        { nombre: 'No cuento con un correo institucional', etiqueta: 'No cuento con un correo institucional' },
-        { nombre: 'Otro', etiqueta: 'Otro' }
-    ];
     const REPORTS_BY_PLATFORM = {
         'Google Classroom': [
             '1. No hay acceso al Classroom',
@@ -48,11 +41,18 @@
             programas: 'Enfermería'
         }
     ];
+    let catalogRequestId = 0;
 
-    function renderSelect(select, items, placeholder, getLabel = item => item.nombre) {
+    function renderSelect(
+        select,
+        items,
+        placeholder,
+        getLabel = item => item.nombre,
+        getValue = item => item.id ?? item.nombre
+    ) {
         select.replaceChildren(new Option(placeholder, ''));
         items.forEach(item => {
-            const option = new Option(getLabel(item), item.id ?? item.nombre);
+            const option = new Option(getLabel(item), getValue(item));
             if (item.nombre) option.dataset.platformName = item.nombre;
             select.add(option);
         });
@@ -66,7 +66,8 @@
         if (!platformSelect || !problemSelect) return;
 
         const platformName = platformSelect.selectedOptions[0]?.dataset.platformName || '';
-        const reports = REPORTS_BY_PLATFORM[platformName] || [];
+        const reports = REPORTS_BY_PLATFORM[platformName] ||
+            (platformName ? [`Problema de acceso a ${platformName}`, 'Otro problema'] : []);
         problemSelect.replaceChildren(new Option(
             reports.length ? 'Selecciona un tipo de reporte...' : 'Primero selecciona una plataforma...',
             ''
@@ -76,6 +77,7 @@
     }
 
     async function loadCatalogs() {
+        const requestId = ++catalogRequestId;
         const platformSelect = document.getElementById('accountPlatform');
         const facultySelect = document.getElementById('facultad');
         if (!platformSelect || !facultySelect) return;
@@ -95,16 +97,14 @@
                 try {
                     const platforms = await global.CuentasApi.getPlataformas();
                     if (!Array.isArray(platforms)) throw new Error('La respuesta de plataformas no es una lista');
-                    const byName = new Map(platforms.map(platform => [platform.nombre, platform]));
-                    const officialPlatforms = OFFICIAL_PLATFORMS
-                        .map(item => ({ ...byName.get(item.nombre), etiqueta: item.etiqueta }))
-                        .filter(item => item.id);
-                    renderSelect(platformSelect, officialPlatforms, 'Selecciona una plataforma...', item => item.etiqueta);
-                    if (!officialPlatforms.length) {
-                        platformSelect.replaceChildren(new Option('No hay plataformas oficiales disponibles', ''));
+                    if (requestId !== catalogRequestId) return;
+                    renderSelect(platformSelect, platforms, 'Selecciona una plataforma...');
+                    if (!platforms.length) {
+                        platformSelect.replaceChildren(new Option('No hay plataformas activas', ''));
                     }
                     updateProblemTypes();
                 } catch (error) {
+                    if (requestId !== catalogRequestId) return;
                     console.error('No se pudieron cargar las plataformas institucionales:', error);
                     platformSelect.replaceChildren(new Option('No se pudieron cargar las plataformas', ''));
                     platformSelect.disabled = false;
@@ -115,42 +115,41 @@
                 try {
                     const faculties = await global.CuentasApi.getFacultades();
                     if (!Array.isArray(faculties)) throw new Error('La respuesta de facultades no es una lista');
-                    const officialFaculties = OFFICIAL_FACULTIES.filter(official =>
-                        faculties.some(faculty => faculty.nombre === official.nombre)
+                    if (requestId !== catalogRequestId) return;
+                    renderSelect(
+                        facultySelect,
+                        faculties,
+                        'Selecciona una facultad...',
+                        item => item.nombre,
+                        item => item.nombre
                     );
-                    renderSelect(facultySelect, officialFaculties, 'Selecciona una facultad...');
+                    updateFacultyPrograms();
                 } catch (error) {
+                    if (requestId !== catalogRequestId) return;
                     console.error('No se pudieron cargar las facultades institucionales:', error);
-                    renderSelect(facultySelect, OFFICIAL_FACULTIES, 'Selecciona una facultad...');
+                    facultySelect.replaceChildren(new Option('No se pudieron cargar facultades', ''));
+                    facultySelect.disabled = false;
+                    facultySelect.removeAttribute('disabled');
                 }
             })()
         ]);
     }
 
-    function initialize() {
-        const typeSelect = document.getElementById('ticketType');
-        const openButton = document.getElementById('quickTicketOpen');
-        if (!typeSelect) return;
-
-        typeSelect.addEventListener('change', () => {
-            if (typeSelect.value === 'cuenta') loadCatalogs();
-        });
-        openButton?.addEventListener('click', () => {
-            if (typeSelect.value === 'cuenta') loadCatalogs();
-        });
-
+    function updateFacultyPrograms() {
         const facultySelect = document.getElementById('facultad');
         const programs = document.getElementById('accountFacultyPrograms');
+        if (!programs) return;
+        const faculty = OFFICIAL_FACULTIES.find(item => item.nombre === facultySelect?.value);
+        programs.textContent = faculty ? `Programas: ${faculty.programas}` : 'Programas no especificados.';
+    }
+
+    function initialize() {
+        const facultySelect = document.getElementById('facultad');
         const platformSelect = document.getElementById('accountPlatform');
         const accountForm = document.getElementById('accountTicketForm');
         platformSelect?.addEventListener('change', updateProblemTypes);
         accountForm?.addEventListener('reset', () => queueMicrotask(updateProblemTypes));
-        facultySelect?.addEventListener('change', () => {
-            const faculty = OFFICIAL_FACULTIES.find(item => item.nombre === facultySelect.value);
-            if (programs) {
-                programs.textContent = faculty ? `Programas: ${faculty.programas}` : 'Selecciona tu facultad.';
-            }
-        });
+        facultySelect?.addEventListener('change', updateFacultyPrograms);
     }
 
     global.ModalAcceso = Object.freeze({ initialize, loadCatalogs });

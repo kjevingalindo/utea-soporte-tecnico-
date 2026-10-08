@@ -1,8 +1,10 @@
 const fs = require('fs');
+const crypto = require('crypto');
+const path = require('path');
 const { success, error } = require('../utils/responseHandler');
 const cuentasService = require('../services/cuentas.service');
-
-const STAFF_ROLES = new Set(['admin', 'superadmin', 'tecnico', 'adminti']);
+const { ACCOUNT_STAFF_ROLES, isAccountStaff } = require('../utils/accessControl');
+const STAFF_ROLES = ACCOUNT_STAFF_ROLES;
 const uploadDirectory = require('path').resolve(__dirname, '../uploads/cuentas');
 
 function texto(value, maxLength, { required = false } = {}) {
@@ -27,6 +29,18 @@ async function removeUploadedFile(req) {
             console.error('No se pudo eliminar la evidencia temporal:', cleanupError.message);
         }
     }
+}
+
+async function hashUploadedFile(file) {
+    if (!file) return null;
+    const hash = crypto.createHash('sha256');
+    await new Promise((resolve, reject) => {
+        const stream = fs.createReadStream(file.path);
+        stream.on('data', chunk => hash.update(chunk));
+        stream.once('error', reject);
+        stream.once('end', resolve);
+    });
+    return hash.digest('hex');
 }
 
 function contieneCredenciales(body) {
@@ -130,11 +144,30 @@ async function crearIncidencia(req, res) {
         return error(res, 'El correo alternativo no es válido', 400);
     }
 
+    const idempotencyHash = require('../utils/idempotency').fingerprint({
+        plataforma_id: plataformaId,
+        oficina_id: oficinaId,
+        ticket_id: ticketId,
+        tipo_usuario: tipoUsuario,
+        dni_codigo: dniCodigo,
+        nombres,
+        apellidos,
+        correo_alternativo: correo,
+        telefono,
+        facultad,
+        tipo_problema: tipoProblema,
+        descripcion,
+        prioridad: String(prioridad).toUpperCase(),
+        fileHash: await hashUploadedFile(req.file)
+    });
     const data = await cuentasService.createIncident({
         plataforma_id: plataformaId,
         oficina_id: oficinaId,
         ticket_id: ticketId,
         usuario_id: req.user.id,
+        user_role: req.user.rol,
+        idempotency_key: req.idempotencyKey,
+        idempotency_hash: idempotencyHash,
         tipo_usuario: tipoUsuario,
         dni_codigo: dniCodigo,
         nombres,
@@ -147,7 +180,13 @@ async function crearIncidencia(req, res) {
         prioridad: String(prioridad).toUpperCase(),
         file: req.file
     });
-    return success(res, data, 'Incidencia registrada correctamente', 201);
+    if (data.replayed) await removeUploadedFile(req);
+    return success(
+        res,
+        data,
+        data.replayed ? 'La solicitud de esta incidencia ya estaba registrada' : 'Incidencia registrada correctamente',
+        data.replayed ? 200 : 201
+    );
 }
 
 async function listarIncidencias(req, res) {
@@ -198,7 +237,7 @@ async function obtenerIncidencia(req, res) {
 
     const data = await cuentasService.getIncident(id);
     if (!data) return error(res, 'No se encontró la incidencia', 404);
-    if (!STAFF_ROLES.has(String(req.user.rol || '').toLowerCase()) &&
+    if (!isAccountStaff(req.user) &&
         Number(data.incidencia.usuario_id) !== Number(req.user.id)) {
         return error(res, 'No tienes permisos para acceder a esta incidencia', 403);
     }
@@ -231,12 +270,37 @@ async function subirEvidencia(req, res) {
         await removeUploadedFile(req);
         return error(res, 'El tipo de evidencia debe ser SOPORTE_ANDAHUAYLAS o SOPORTE_ABANCAY', 400);
     }
-    if (!STAFF_ROLES.has(String(req.user.rol || '').toLowerCase())) {
+    if (!isAccountStaff(req.user)) {
         await removeUploadedFile(req);
         return error(res, 'Solo el personal de soporte puede registrar evidencias técnicas', 403);
     }
     const data = await cuentasService.addEvidence({ id, userId: req.user.id, type, file: req.file });
     return success(res, data, 'Evidencia guardada correctamente', 201);
+}
+
+async function descargarEvidencia(req, res) {
+    const incidenciaId = enteroPositivo(req.params.id);
+    const evidenciaId = enteroPositivo(req.params.evidenceId);
+    if (!incidenciaId || !evidenciaId) return error(res, 'El identificador no es válido', 400);
+
+    const evidence = await cuentasService.getEvidenceDownload(incidenciaId, evidenciaId);
+    if (!evidence) return error(res, 'No se encontró la evidencia', 404);
+    if (!isAccountStaff(req.user) && Number(evidence.usuario_id) !== Number(req.user.id)) {
+        return error(res, 'No tienes permisos para descargar esta evidencia', 403);
+    }
+
+    const filePath = path.join(uploadDirectory, path.basename(evidence.nombre_archivo));
+    try {
+        await fs.promises.access(filePath, fs.constants.R_OK);
+    } catch (cause) {
+        if (cause.code === 'ENOENT') return error(res, 'El archivo ya no está disponible', 404);
+        throw cause;
+    }
+    res.download(filePath, path.basename(evidence.nombre_original), downloadError => {
+        if (downloadError && !res.headersSent) {
+            return error(res, 'No se pudo descargar la evidencia', 500);
+        }
+    });
 }
 
 async function obtenerEstadisticas(req, res) {
@@ -254,6 +318,7 @@ module.exports = {
     escalarIncidencia,
     resolverIncidencia,
     subirEvidencia: asyncHandler(subirEvidencia, { cleanupUploadedFile: true }),
+    descargarEvidencia: asyncHandler(descargarEvidencia),
     obtenerEstadisticas,
     rechazarCredenciales,
     uploadDirectory

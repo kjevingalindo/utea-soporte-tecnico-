@@ -1,6 +1,9 @@
-document.addEventListener('DOMContentLoaded', () => {
+export function initializeDashboardCalendar() {
+    if (!window.UTEAAccessControl?.canListAllTickets(window.UTEAIdentity)) return;
     const calendar = document.getElementById('incidentCalendarGrid');
     if (!calendar) return;
+    if (calendar.dataset.calendarInitialized === 'true') return;
+    calendar.dataset.calendarInitialized = 'true';
 
     const monthDisplay = document.getElementById('monthDisplay');
     const selectedDateDisplay = document.getElementById('calendarSelectedDate');
@@ -143,4 +146,4 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     renderCalendar();
-});
+}
