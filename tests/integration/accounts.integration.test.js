@@ -3,16 +3,14 @@ const assert = require('node:assert/strict');
 const mysql = require('mysql2/promise');
 const crypto = require('crypto');
 
-const enabled = process.env.UTEA_TEST_DB_ALLOW_INTEGRATION === '1' &&
-    /_test$/i.test(process.env.UTEA_TEST_DB_NAME || '') &&
-    Boolean(process.env.UTEA_TEST_DB_HOST && process.env.UTEA_TEST_DB_USER);
+const integrationEnabled = process.env.UTEA_TEST_DB_ALLOW_INTEGRATION === '1';
+if (integrationEnabled) {
+    require('../../backend/config/databaseConfig').applyTestDatabaseEnvironment();
+}
+const enabled = integrationEnabled;
 
 if (enabled) {
-    process.env.DB_HOST = process.env.UTEA_TEST_DB_HOST;
-    process.env.DB_PORT = process.env.UTEA_TEST_DB_PORT || '3306';
-    process.env.DB_USER = process.env.UTEA_TEST_DB_USER;
-    process.env.DB_PASSWORD = process.env.UTEA_TEST_DB_PASSWORD || '';
-    process.env.DB_NAME = process.env.UTEA_TEST_DB_NAME;
+    process.env.JWT_SECRET = 'utea-integration-test-only-secret';
 }
 
 test('account incident idempotency, linking permissions, and locked state changes', {
@@ -25,8 +23,25 @@ test('account incident idempotency, linking permissions, and locked state change
         password: process.env.DB_PASSWORD,
         database: process.env.DB_NAME
     });
+    const [[databaseIdentity]] = await connection.query(
+        'SELECT DATABASE() AS databaseName, @@port AS serverPort'
+    );
+    assert.equal(databaseIdentity.databaseName, process.env.UTEA_TEST_DB_NAME);
+    assert.equal(Number(databaseIdentity.serverPort), Number(process.env.UTEA_TEST_DB_PORT));
     const service = require('../../backend/services/cuentas.service');
+    let createdIncidentIds = [];
+    let createdTicketIds = [];
+    const createdUserIds = [];
     t.after(async () => {
+        if (createdIncidentIds.length) {
+            await connection.query('DELETE FROM incidencias_cuentas WHERE id IN (?)', [createdIncidentIds]);
+        }
+        if (createdTicketIds.length) {
+            await connection.query('DELETE FROM tickets WHERE id IN (?)', [createdTicketIds]);
+        }
+        if (createdUserIds.length) {
+            await connection.query('DELETE FROM usuarios WHERE id IN (?)', [createdUserIds]);
+        }
         await service.close();
         await connection.end();
     });
@@ -36,10 +51,12 @@ test('account incident idempotency, linking permissions, and locked state change
         'INSERT INTO usuarios (username, password, rol) VALUES (?, ?, ?)',
         [`integration-${suffix}`, 'test-only-not-a-credential', 'usuario']
     );
+    createdUserIds.push(userResult.insertId);
     const [otherUserResult] = await connection.execute(
         'INSERT INTO usuarios (username, password, rol) VALUES (?, ?, ?)',
         [`integration-other-${suffix}`, 'test-only-not-a-credential', 'usuario']
     );
+    createdUserIds.push(otherUserResult.insertId);
     const [[platform]] = await connection.execute(
         'SELECT id FROM plataformas WHERE activo = TRUE ORDER BY id LIMIT 1'
     );
@@ -71,6 +88,7 @@ test('account incident idempotency, linking permissions, and locked state change
         service.createIncident(incident),
         service.createIncident(incident)
     ]);
+    createdIncidentIds.push(created[0].id);
     assert.equal(created[0].id, created[1].id);
     assert.equal(created.filter(result => result.replayed).length, 1);
 
@@ -83,6 +101,7 @@ test('account incident idempotency, linking permissions, and locked state change
         'INSERT INTO tickets (titulo, descripcion, user_id) VALUES (?, ?, ?)',
         ['Ticket ajeno de prueba', 'Registro ficticio', otherUserResult.insertId]
     );
+    createdTicketIds.push(ticketResult.insertId);
     await assert.rejects(
         service.createIncident({
             ...incident,

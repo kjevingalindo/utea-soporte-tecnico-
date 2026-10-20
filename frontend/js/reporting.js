@@ -84,13 +84,41 @@
             : null;
     }
 
+    function monthlyResolutionMetrics(cases, monthKey, resolutionTimestamps, isResolved) {
+        const registered = cases.filter(item => month(item.fecha_creacion) === monthKey);
+        const resolvedDuringMonth = cases.filter(item =>
+            resolutionTimestamps(item).some(value => month(value) === monthKey)
+        );
+        const registeredResolved = registered.filter(isResolved);
+        return {
+            registered,
+            resolvedDuringMonth,
+            registeredResolved,
+            registeredResolutionPct: registered.length
+                ? Math.round(registeredResolved.length * 100 / registered.length)
+                : 0
+        };
+    }
+
+    function ticketsResolvedDuringMonth(cases, monthKey, resolutionTimestamps) {
+        return cases.flatMap(ticket => {
+            const timestamps = resolutionTimestamps(ticket)
+                .filter(value => month(value) === monthKey);
+            return timestamps.length
+                ? [{ ...ticket, reportResolvedAt: timestamps[timestamps.length - 1] }]
+                : [];
+        });
+    }
+
     const api = Object.freeze({
         timestamp,
         month,
         mergeLinkedAccountIncidents,
         aggregateCategories,
         filterCategoryAndMonth,
-        meanElapsedHours
+        meanElapsedHours,
+        monthlyResolutionMetrics,
+        ticketsResolvedDuringMonth
     });
     global.ReportMetrics = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

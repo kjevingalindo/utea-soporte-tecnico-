@@ -167,8 +167,10 @@
                         ));
                     }
                     if (options.canManage && !String(ticket.id).startsWith('CTA-')) {
+                        if (options.canResolve?.(ticket)) {
+                            cell.appendChild(createActionButton('Resolver', 'Resolver', () => options.onResolve(ticket.id)));
+                        }
                         cell.append(
-                            createActionButton('Resolver', 'Resolver', () => options.onResolve(ticket.id)),
                             createActionButton('Eliminar', 'Eliminar', () => options.onDelete(ticket.id)),
                             createActionButton('Editar', 'Editar', () => options.onEdit(ticket)),
                             createActionButton('Notas', 'Notas', () => options.onComments(ticket.id))

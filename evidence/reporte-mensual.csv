@@ -1,0 +1,15 @@
+﻿"Reporte mensual de soporte UTEA","octubre de 2026"
+"Casos únicos registrados durante el mes","2"
+"Casos resueltos durante el mes","1"
+"Resolución de casos registrados durante el mes","0%"
+"Casos registrados durante el mes que ya están resueltos","0"
+"Casos registrados este mes que siguen abiertos","2"
+"Tiempo medio de resolución en el mes","0.0 h"
+
+"Ticket / cuenta vinculados","Asunto","Solicitante","Oficina","Categoría","Técnico","Prioridad","Estado","Fecha de registro"
+"#102","Incidencia de red en Auditorio - 1792460726699","Solicitante de prueba A","Aulas de Clase","Audio y Parlantes de Aula","Tecnico Jefe","Media","En proceso","19/10/2026, 8:45:26 p. m."
+"#35","Validación de interfaz UTEA 10 oct 2026","Solicitante ficticio de validación","Aulas de Clase","Proyector / Ecran Multimedia","Técnico de prueba","Media","Asignado","10/10/2026, 10:18:17 a. m."
+
+"Productividad: casos resueltos durante el mes","octubre de 2026"
+"Ticket / cuenta vinculados","Asunto","Solicitante","Oficina","Categoría","Técnico","Prioridad","Estado","Fecha de registro","Fecha de resolución"
+"#102","Incidencia de red en Auditorio - 1792460726699","Solicitante de prueba A","Aulas de Clase","Audio y Parlantes de Aula","Tecnico Jefe","Media","En proceso","19/10/2026, 8:45:26 p. m.","19/10/2026, 8:45:40 p. m."

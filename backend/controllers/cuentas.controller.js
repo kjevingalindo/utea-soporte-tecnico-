@@ -5,7 +5,10 @@ const { success, error } = require('../utils/responseHandler');
 const cuentasService = require('../services/cuentas.service');
 const { ACCOUNT_STAFF_ROLES, isAccountStaff } = require('../utils/accessControl');
 const STAFF_ROLES = ACCOUNT_STAFF_ROLES;
-const uploadDirectory = require('path').resolve(__dirname, '../uploads/cuentas');
+const uploadRoot = process.env.UTEA_UPLOAD_ROOT
+    ? require('path').resolve(process.env.UTEA_UPLOAD_ROOT)
+    : require('path').resolve(__dirname, '../uploads');
+const uploadDirectory = require('path').join(uploadRoot, 'cuentas');
 
 function texto(value, maxLength, { required = false } = {}) {
     if (typeof value !== 'string') return required ? null : '';

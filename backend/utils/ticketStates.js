@@ -26,4 +26,4 @@ function canTransitionTicket(current, next) {
     return current === next || Boolean(ALLOWED_TRANSITIONS[current]?.has(next));
 }
 
-module.exports = { TICKET_STATES, isValidTicketState, canTransitionTicket };
+module.exports = { TICKET_STATES, ALLOWED_TRANSITIONS, isValidTicketState, canTransitionTicket };

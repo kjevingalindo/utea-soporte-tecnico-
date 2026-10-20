@@ -34,6 +34,7 @@ async function initializeAppModules() {
         import('./modules/dashboardModule.js'),
         import('./modules/ticketsModule.js')
     ];
+    if (!access.canListAllTickets(user)) moduleImports.push(import('./modules/profileModule.js'));
     if (canManageAccounts) moduleImports.push(import('./modules/accountsModule.js'));
     if (canViewReports) moduleImports.push(import('./modules/reportsModule.js'));
     if (canManageAdmin) {
@@ -54,6 +55,7 @@ async function initializeAppModules() {
         ['tickets', loadedModules[1].createTicketsModule]
     ];
     let moduleIndex = 2;
+    if (!access.canListAllTickets(user)) registries.push(['profile', loadedModules[moduleIndex++].createProfileModule]);
     if (canManageAccounts) registries.push(['accounts', loadedModules[moduleIndex++].createAccountsModule]);
     if (canViewReports) registries.push(['reports', loadedModules[moduleIndex++].createReportsModule]);
     if (canManageAdmin) {
@@ -66,6 +68,10 @@ async function initializeAppModules() {
             window.UTEAApp.registerModule(name, factory);
         }
     });
+    window.UTEAApp?.registerModule(
+        'ticketDetail',
+        window.UTEATicketDetailModule.createTicketDetailModule
+    );
 
     if (window.UTEAApp?.initModules) {
         window.UTEAApp.initModules();

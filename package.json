@@ -7,7 +7,11 @@
     "start": "node backend/server.js",
     "dev": "nodemon backend/server.js",
     "db:migrate": "node scripts/migrate.js",
+    "db:migrate:test": "node scripts/run-test-env.js migrate",
+    "db:seed:test-users": "node scripts/seed-test-browser-users.js",
     "test:integration": "node --test tests/integration/accounts.integration.test.js tests/integration/ticket-routes.integration.test.js",
+    "test:integration:isolated": "node scripts/run-test-env.js integration",
+    "start:test": "node scripts/run-test-env.js start",
     "test": "node --test"
   },
   "keywords": [],
@@ -25,5 +29,8 @@
     "nodemailer": "^10.0.13",
     "nodemon": "^3.1.14",
     "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.64.1"
   }
 }

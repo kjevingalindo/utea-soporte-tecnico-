@@ -6,7 +6,9 @@ const {
     mergeLinkedAccountIncidents,
     aggregateCategories,
     filterCategoryAndMonth,
-    meanElapsedHours
+    meanElapsedHours,
+    monthlyResolutionMetrics,
+    ticketsResolvedDuringMonth
 } = require('../frontend/js/reporting');
 
 test('parses SQL timestamps as Lima local time and SLA values as milliseconds', () => {
@@ -59,4 +61,37 @@ test('averages real millisecond SLA durations and returns no-data for empty obse
     ];
     assert.equal(meanElapsedHours(records, record => record.sla_resolved_at), 3);
     assert.equal(meanElapsedHours([], record => record.sla_resolved_at), null);
+});
+
+test('October productivity includes a September ticket resolved in October without inflating October cohort progress', () => {
+    const cases = [
+        {
+            id: 1,
+            fecha_creacion: '2026-10-03 10:00:00',
+            estado: 'En proceso',
+            resolutions: []
+        },
+        {
+            id: 2,
+            fecha_creacion: '2026-09-27 10:00:00',
+            estado: 'Solucionado',
+            resolutions: ['2026-10-05 11:00:00']
+        }
+    ];
+    const metrics = monthlyResolutionMetrics(
+        cases,
+        '2026-10',
+        item => item.resolutions,
+        item => ['Solucionado', 'Cerrado', 'Resuelto'].includes(item.estado)
+    );
+
+    assert.deepEqual(metrics.registered.map(item => item.id), [1]);
+    assert.deepEqual(metrics.resolvedDuringMonth.map(item => item.id), [2]);
+    assert.deepEqual(metrics.registeredResolved, []);
+    assert.equal(metrics.registeredResolutionPct, 0);
+    assert.deepEqual(
+        ticketsResolvedDuringMonth(cases, '2026-10', item => item.resolutions)
+            .map(item => [item.id, item.reportResolvedAt]),
+        [[2, '2026-10-05 11:00:00']]
+    );
 });

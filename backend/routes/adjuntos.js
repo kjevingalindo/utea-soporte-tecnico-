@@ -10,7 +10,10 @@ const { registrarHistorial } = require('./historial');
 const requireTicketAccess = require('../middleware/ticketAccess');
 const { TICKET_ATTACHMENT_ROLES } = require('../utils/accessControl');
 
-const uploadDirectory = path.resolve(__dirname, '../uploads/tickets');
+const uploadRoot = process.env.UTEA_UPLOAD_ROOT
+    ? path.resolve(process.env.UTEA_UPLOAD_ROOT)
+    : path.resolve(__dirname, '../uploads');
+const uploadDirectory = path.join(uploadRoot, 'tickets');
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const allowedTypes = new Map([
     ['image/jpeg', '.jpg'],

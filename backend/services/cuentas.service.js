@@ -1,13 +1,15 @@
 const mysql = require('mysql2/promise');
 const path = require('path');
 const { isAccountStaff } = require('../utils/accessControl');
+const { resolveDatabaseConfig } = require('../config/databaseConfig');
 
+const databaseConfig = resolveDatabaseConfig();
 const pool = mysql.createPool({
-    host: process.env.DB_HOST,
-    port: Number(process.env.DB_PORT || 3306),
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD || '',
-    database: process.env.DB_NAME,
+    host: databaseConfig.host,
+    port: databaseConfig.port,
+    user: databaseConfig.user,
+    password: databaseConfig.password,
+    database: databaseConfig.database,
     waitForConnections: true,
     connectionLimit: 5,
     queueLimit: 0

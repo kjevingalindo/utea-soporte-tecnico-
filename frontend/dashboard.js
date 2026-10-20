@@ -1,5 +1,5 @@
 export function initializeDashboardCalendar() {
-    if (!window.UTEAAccessControl?.canListAllTickets(window.UTEAIdentity)) return;
+    if (!window.UTEAAccessControl?.canAccessCalendar(window.UTEAIdentity)) return;
     const calendar = document.getElementById('incidentCalendarGrid');
     if (!calendar) return;
     if (calendar.dataset.calendarInitialized === 'true') return;

@@ -10,10 +10,6 @@
     }
 
     class HttpClient {
-        constructor() {
-            this.pendingRequests = new Map();
-        }
-
         getAuthToken() {
             return global.localStorage ? global.localStorage.getItem('token') : null;
         }
@@ -30,20 +26,21 @@
         request(endpoint, options = {}) {
             const { allowHttpErrors = false, timeoutMs = global.UTEAConfig?.defaultTimeoutMs || 30000, signal, ...requestOptions } = options;
             const finalEndpoint = endpoint.startsWith('http') ? endpoint : `${global.UTEAConfig?.apiBaseUrl || ''}${endpoint}`;
+            const method = String(requestOptions.method || 'GET').toUpperCase();
             const controller = new AbortController();
-            const combinedSignal = signal || controller.signal;
-            const key = `${(requestOptions.method || 'GET').toUpperCase()}::${finalEndpoint}`;
-            const duplicate = this.pendingRequests.get(key);
-            if (duplicate && requestOptions.method !== 'POST') {
-                return duplicate;
+            const abortFromCaller = () => controller.abort(signal?.reason);
+            if (signal?.aborted) {
+                abortFromCaller();
+            } else {
+                signal?.addEventListener('abort', abortFromCaller, { once: true });
             }
 
             const timeoutId = global.setTimeout(() => controller.abort(), timeoutMs);
             const headers = this.buildHeaders(requestOptions.headers || {}, true);
-            const requestPromise = global.fetch(finalEndpoint, { ...requestOptions, headers, signal: combinedSignal })
+            return global.fetch(finalEndpoint, { ...requestOptions, method, headers, signal: controller.signal })
                 .finally(() => {
                     global.clearTimeout(timeoutId);
-                    this.pendingRequests.delete(key);
+                    signal?.removeEventListener('abort', abortFromCaller);
                 })
                 .then(async response => {
                     if (!response.ok && !allowHttpErrors) {
@@ -66,9 +63,6 @@
                     }
                     throw error;
                 });
-
-            this.pendingRequests.set(key, requestPromise);
-            return requestPromise;
         }
 
         get(endpoint, options = {}) {

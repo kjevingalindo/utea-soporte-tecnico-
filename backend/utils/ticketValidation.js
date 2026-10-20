@@ -51,7 +51,19 @@ function enteroPositivo(value) {
 }
 
 function validateTicketCreation(body) {
-    const value = body || {};
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+        return { error: 'El cuerpo de la solicitud no es válido' };
+    }
+    const value = body;
+    const allowedFields = new Set([
+        'titulo', 'descripcion', 'tecnico_id', 'oficina_id', 'categoria_id',
+        'categoria_usuario', 'solicitante_nombre', 'codigo_universitario_dni',
+        'tipo_solicitante', 'impacto', 'urgencia', 'carrera', 'bloque',
+        'ambiente', 'ubicacion', 'aula', 'asignatura_area'
+    ]);
+    const unexpectedField = Object.keys(value).find(field => !allowedFields.has(field));
+    if (unexpectedField) return { error: `Campo no permitido: ${unexpectedField}` };
+
     const requiredText = [
         ['titulo', 255, 'El título es obligatorio y debe tener como máximo 255 caracteres'],
         ['descripcion', 10000, 'La descripción es obligatoria y debe tener como máximo 10000 caracteres'],
@@ -59,7 +71,6 @@ function validateTicketCreation(body) {
         ['codigo_universitario_dni', 40, 'El código universitario o DNI es obligatorio y no puede superar 40 caracteres'],
         ['tipo_solicitante', 32, 'El tipo de solicitante no es válido'],
         ['categoria_usuario', 80, 'La categoría de soporte es obligatoria y no es válida'],
-        ['carrera', 120, 'La carrera o programa es obligatorio y no es válido'],
         ['bloque', 20, 'El bloque es obligatorio y no es válido'],
         ['ambiente', 180, 'El ambiente es obligatorio y no es válido']
     ];
@@ -67,13 +78,18 @@ function validateTicketCreation(body) {
         if (!textoValido(value[field], maxLength)) return { error: message };
     }
 
-    if (!['estudiante', 'docente', 'administrativo'].includes(value.tipo_solicitante)) {
+    if (!['estudiante', 'docente', 'administrativo', 'oficina'].includes(value.tipo_solicitante)) {
         return { error: 'El tipo de solicitante no es válido' };
     }
     if (!CATEGORIAS_USUARIO_VALIDAS.has(value.categoria_usuario)) {
         return { error: 'La categoría de soporte seleccionada no es válida' };
     }
-    if (!UTEA_PREGRADO_CARRERAS.includes(value.carrera.trim())) {
+    const carrera = typeof value.carrera === 'string' ? value.carrera.trim() : '';
+    const requiereCarrera = ['estudiante', 'docente'].includes(value.tipo_solicitante);
+    if (requiereCarrera && !carrera) {
+        return { error: 'La carrera o programa es obligatorio para este tipo de solicitante' };
+    }
+    if (carrera && !UTEA_PREGRADO_CARRERAS.includes(carrera)) {
         return { error: 'La carrera seleccionada no es válida para la UTEA' };
     }
     if (!Object.prototype.hasOwnProperty.call(AMBIENTES_POR_BLOQUE, value.bloque) ||
@@ -93,6 +109,10 @@ function validateTicketCreation(body) {
     }
     if (!enteroPositivo(value.oficina_id) || !enteroPositivo(value.categoria_id)) {
         return { error: 'Selecciona una oficina y categoría válidas' };
+    }
+    if (value.tecnico_id != null && value.tecnico_id !== '' &&
+        !enteroPositivo(value.tecnico_id)) {
+        return { error: 'El técnico seleccionado no es válido' };
     }
     if (value.ubicacion != null &&
         (typeof value.ubicacion !== 'string' || value.ubicacion.trim().length > 255)) {
@@ -117,7 +137,7 @@ function validateTicketCreation(body) {
             descripcion: value.descripcion.trim(),
             solicitante_nombre: value.solicitante_nombre.trim(),
             codigo_universitario_dni: value.codigo_universitario_dni.trim(),
-            carrera: value.carrera.trim(),
+            carrera: requiereCarrera ? carrera : null,
             asignatura_area: value.tipo_solicitante === 'docente' ? value.asignatura_area.trim() : null,
             ubicacion: [value.bloque, value.ambiente, aula === null ? '' : `Aula ${aula}`].filter(Boolean).join(' - '),
             oficina_id: Number(value.oficina_id),

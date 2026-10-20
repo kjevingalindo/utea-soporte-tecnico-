@@ -219,7 +219,7 @@
                                     </div>
                                 </div>
                                 <div class="support-progress-counts">
-                                    <div><span>Resueltos este mes</span><strong id="supportProgressResolved">0</strong></div>
+                                    <div><span>De los registrados este mes, resueltos</span><strong id="supportProgressResolved">0</strong></div>
                                     <div><span>Abiertos de los registrados este mes</span><strong id="supportProgressOpen">0</strong></div>
                                 </div>
                                 <p id="supportFirstResponse">Tiempo de primera atención: sin datos.</p>
@@ -267,7 +267,7 @@
                     
                     <div class="dashboard-widgets">
                         <!-- Widget Calendario -->
-                        <div class="widget-card incident-calendar">
+                        <div class="widget-card incident-calendar" id="incidentCalendarWidget">
                             <div class="widget-header">
                                 <h3>Calendario de Incidencias</h3>
                                 <div class="calendar-nav">
@@ -325,7 +325,7 @@
                             <h2 style="margin:0 0 4px; font-size:1.6rem; font-weight:600;">Tu actividad</h2>
                             <p style="margin:0; color:var(--text-secondary);">Consulta el estado y las últimas novedades de tus tickets.</p>
                         </div>
-                        <div class="kpi-grid">
+                        <div class="kpi-grid" id="staffInstitutionalKpis">
                             <div class="kpi-card">
                                 <div class="kpi-icon" style="background:#e0f2fe; color:#0284c7;"><i class="ph-fill ph-ticket"></i></div>
                                 <div class="kpi-data"><h3>Mis tickets</h3><p id="personal-kpi-total">0</p></div>
@@ -760,8 +760,8 @@
                         <div class="monthly-report-actions">
                             <label for="reportMonthSelect">Mes del reporte</label>
                             <select id="reportMonthSelect" class="modal-input" aria-label="Mes del reporte"></select>
-                            <button class="btn-primary" onclick="window.generarReportePDFMensual()"><i class="ph ph-file-pdf"></i> Reporte Mensual PDF</button>
-                            <button class="btn-secondary" onclick="window.exportarTicketsExcel()"><i class="ph ph-file-xls"></i> Descargar CSV</button>
+                            <button class="btn-primary" type="button" data-report-action="pdf"><i class="ph ph-printer"></i> Imprimir / guardar como PDF</button>
+                            <button class="btn-secondary" type="button" data-report-action="csv"><i class="ph ph-file-xls"></i> Descargar CSV</button>
                         </div>
                     </div>
 
@@ -860,6 +860,35 @@
                                 </thead>
                                 <tbody id="reportTicketsBody">
                                     <tr><td colspan="7" class="report-empty-cell">Selecciona un mes para ver sus incidencias.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+
+                    <section class="widget-card monthly-report-detail">
+                        <div class="widget-header">
+                            <div>
+                                <h3>Productividad: casos resueltos durante el mes</h3>
+                                <p id="reportResolvedMonthDescription" class="text-muted">Casos resueltos en el periodo seleccionado, incluidos los registrados anteriormente.</p>
+                            </div>
+                            <span id="reportResolvedMonthCount" class="report-count-badge">0 incidencias</span>
+                        </div>
+                        <div class="table-container">
+                            <table class="monthly-report-table">
+                                <thead>
+                                    <tr>
+                                        <th>Incidencia</th>
+                                        <th>Solicitante</th>
+                                        <th>Categoría</th>
+                                        <th>Prioridad</th>
+                                        <th>Estado</th>
+                                        <th>Registro</th>
+                                        <th>Resolución</th>
+                                        <th>Abrir</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="reportResolvedTicketsBody">
+                                    <tr><td colspan="8" class="report-empty-cell">Selecciona un mes para ver sus incidencias resueltas.</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -976,24 +1005,25 @@
         </div>
         <form id="formTicket" class="inline-form ticket-create-form grid grid-cols-1 md:grid-cols-2 gap-3">
             <div class="form-group">
-                <input type="text" id="titulo" placeholder="Asunto del ticket" required>
+                <input type="text" id="titulo" name="titulo" maxlength="255" placeholder="Asunto del ticket" required>
             </div>
             <div class="form-group">
-                <input type="text" id="solicitanteNombre" placeholder="Nombre completo del solicitante" maxlength="150" required>
+                <input type="text" id="solicitanteNombre" name="solicitante_nombre" placeholder="Nombre completo del solicitante" maxlength="150" required>
             </div>
             <div class="form-group">
-                <input type="text" id="codigoUniversitarioDni" placeholder="Código universitario o DNI" maxlength="40" required>
+                <input type="text" id="codigoUniversitarioDni" name="codigo_universitario_dni" placeholder="Código universitario o DNI" maxlength="40" required>
             </div>
             <div class="form-group">
-                <select id="tipoSolicitante" required>
+                <select id="tipoSolicitante" name="tipo_solicitante" required>
                     <option value="">Tipo de usuario...</option>
                     <option value="estudiante">Estudiante</option>
                     <option value="docente">Docente</option>
                     <option value="administrativo">Administrativo</option>
+                    <option value="oficina">Oficina</option>
                 </select>
             </div>
             <div class="form-group">
-                <select id="ticketCategoria" required aria-label="Categoría de soporte">
+                <select id="ticketCategoria" name="categoria_usuario" required aria-label="Categoría de soporte">
                     <option value="">Categoría de soporte...</option>
                     <option value="Internet">Internet</option>
                     <option value="Cuentas institucionales">Cuentas institucionales</option>
@@ -1005,8 +1035,8 @@
                     <option value="ERP University">ERP University</option>
                 </select>
             </div>
-            <div class="form-group">
-                <select id="carreraTicket" required>
+            <div class="form-group" id="carreraTicketGroup">
+                <select id="carreraTicket" name="carrera">
                     <option value="">Carrera / programa...</option>
                     <option>Agronomía</option>
                     <option>Ingeniería Civil</option>
@@ -1018,10 +1048,10 @@
                 </select>
             </div>
             <div class="form-group" id="asignaturaAreaGroup" hidden>
-                <input type="text" id="asignaturaArea" placeholder="Asignatura o área académica" maxlength="160" aria-label="Asignatura o área académica">
+                <input type="text" id="asignaturaArea" name="asignatura_area" placeholder="Asignatura o área académica" maxlength="160" aria-label="Asignatura o área académica">
             </div>
             <div class="form-group">
-                <select id="ticketBloque" required>
+                <select id="ticketBloque" name="bloque" required>
                     <option value="">Bloque...</option>
                     <option value="Bloque A">Bloque A</option>
                     <option value="Bloque B">Bloque B</option>
@@ -1030,15 +1060,15 @@
                 </select>
             </div>
             <div class="form-group">
-                <select id="ticketAmbiente" required disabled>
+                <select id="ticketAmbiente" name="ambiente" required disabled>
                     <option value="">Primero selecciona un bloque...</option>
                 </select>
             </div>
             <div class="form-group" id="ticketNumeroAulaContainer" hidden>
-                <input type="number" id="ticketNumeroAula" min="1" max="9999" step="1" placeholder="N° Aula (ej: 101, 201, 301)">
+                <input type="number" id="ticketNumeroAula" name="aula" min="1" max="9999" step="1" placeholder="N° Aula (ej: 101, 201, 301)">
             </div>
             <div class="form-group">
-                <select id="impacto">
+                <select id="impacto" name="impacto">
                     <option value="Bajo">Impacto: Bajo</option>
                     <option value="Medio" selected>Impacto: Medio</option>
                     <option value="Alto">Impacto: Alto</option>
@@ -1046,7 +1076,7 @@
                 </select>
             </div>
             <div class="form-group">
-                <select id="urgencia">
+                <select id="urgencia" name="urgencia">
                     <option value="Baja">Urgencia: Baja</option>
                     <option value="Media" selected>Urgencia: Media</option>
                     <option value="Alta">Urgencia: Alta</option>
@@ -1054,7 +1084,7 @@
                 </select>
             </div>
             <div class="form-group form-group-full">
-                <textarea id="descripcion" placeholder="Descripción detallada" required></textarea>
+                <textarea id="descripcion" name="descripcion" maxlength="10000" placeholder="Descripción detallada" required></textarea>
             </div>
             <div id="autoDiagnosticBox" class="form-group-full" style="display:none;">
                 <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:16px; margin:4px 0 12px 0;">
@@ -1076,11 +1106,11 @@
             </div>
             <div class="form-group form-group-full">
                 <label for="fotoIncidencia" style="display:block; margin-bottom:8px; font-weight:600;">Foto de la incidencia (opcional)</label>
-                <input id="fotoIncidencia" type="file" accept="image/jpeg,image/png,image/webp" capture="environment">
+                <input id="fotoIncidencia" name="fotoIncidencia" type="file" accept="image/jpeg,image/png,image/webp" capture="environment">
                 <small style="display:block; margin-top:6px; color:var(--text-secondary);">JPG, PNG o WEBP. Máximo 10 MB.</small>
             </div>
             <div id="asignarTecnicoContainer" class="form-group" hidden>
-                <select id="asignarTecnico">
+                <select id="asignarTecnico" name="tecnico_id">
                     <option value="">Asignar técnico...</option>
                 </select>
             </div>
@@ -1285,7 +1315,14 @@
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
     <script src="messages.js"></script>
     <script src="accessControl.js"></script>
+    <script src="js/components/safeText.js"></script>
+    <script src="js/components/ticketDetailView.js"></script>
+    <script src="js/modules/ticketDetailModule.js"></script>
+    <script src="js/viewNavigation.js"></script>
+    <script src="js/comments.js"></script>
+    <script src="js/ticketForm.js"></script>
     <script src="js/ticketTable.js"></script>
+    <script src="js/reportExports.js"></script>
     <script src="app.js"></script>
     <script src="authCheck.js"></script>
     <script type="module" src="js/main.js"></script>

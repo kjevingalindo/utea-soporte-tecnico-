@@ -16,6 +16,7 @@ const tickets = [
     { user_id: 202, estado: 'Clasificado', prioridad: 'Media' }
 ];
 const accountIncidentsByUser = new Map([[101, 2], [202, 1]]);
+let databaseReadCount = 0;
 
 function rows(result) {
     return [result, []];
@@ -37,6 +38,7 @@ const mockDb = {
     promise() {
         return {
             async query(sql) {
+                databaseReadCount += 1;
                 if (sql.includes('SELECT COUNT(*) AS total FROM tickets')) {
                     return rows([{ total: tickets.length }]);
                 }
@@ -119,6 +121,25 @@ test('backend dashboard endpoints isolate requesters and reserve global views fo
         server.close();
         if (originalDbCacheEntry) require.cache[dbPath] = originalDbCacheEntry;
         else delete require.cache[dbPath];
+    });
+
+    test('initial administrator bootstrap requires explicit username and password before querying the database', async () => {
+        const previousUsername = process.env.ADMIN_USERNAME;
+        const previousPassword = process.env.ADMIN_PASSWORD;
+        const before = databaseReadCount;
+        try {
+            delete process.env.ADMIN_USERNAME;
+            delete process.env.ADMIN_PASSWORD;
+            await authRoutes.ensureDefaultAdmin();
+            process.env.ADMIN_PASSWORD = 'fictitious-test-password';
+            await authRoutes.ensureDefaultAdmin();
+            assert.equal(databaseReadCount, before);
+        } finally {
+            if (previousUsername === undefined) delete process.env.ADMIN_USERNAME;
+            else process.env.ADMIN_USERNAME = previousUsername;
+            if (previousPassword === undefined) delete process.env.ADMIN_PASSWORD;
+            else process.env.ADMIN_PASSWORD = previousPassword;
+        }
     });
 
     await new Promise(resolve => server.once('listening', resolve));

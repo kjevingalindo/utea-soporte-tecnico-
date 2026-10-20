@@ -5,7 +5,7 @@ const verificarToken = require('../middleware/authMiddleware');
 const { crearNotificacion } = require('./notifications');
 const { registrarHistorial } = require('./historial');
 const requireTicketAccess = require('../middleware/ticketAccess');
-const { TICKET_ATTACHMENT_ROLES } = require('../utils/accessControl');
+const { TICKET_ATTACHMENT_ROLES, canListAllTickets } = require('../utils/accessControl');
 
 // Obtener comentarios de un ticket
 router.get('/:ticketId', verificarToken, requireTicketAccess({ roles: TICKET_ATTACHMENT_ROLES }), (req, res) => {
@@ -53,7 +53,7 @@ router.post('/', verificarToken, requireTicketAccess({ parameter: 'ticket_id', s
                             comentario.trim()
                         );
 
-                        if (req.user.rol === 'admin') {
+                        if (canListAllTickets(req.user)) {
                             if (ownerId && ownerId !== req.user.id) {
                                 crearNotificacion(
                                     ownerId,
@@ -65,7 +65,7 @@ router.post('/', verificarToken, requireTicketAccess({ parameter: 'ticket_id', s
                                 });
                             }
                         } else {
-                            db.query("SELECT id FROM usuarios WHERE rol = 'admin'", (err3, admins) => {
+                            db.query("SELECT id FROM usuarios WHERE rol IN ('admin', 'superadmin')", (err3, admins) => {
                                 if (!err3 && admins) {
                                     admins.forEach(admin => {
                                         crearNotificacion(
@@ -86,7 +86,7 @@ router.post('/', verificarToken, requireTicketAccess({ parameter: 'ticket_id', s
                 });
             };
 
-            if (req.user.rol === 'admin') {
+            if (canListAllTickets(req.user)) {
                 db.query(
                     'UPDATE tickets SET sla_first_response_at = COALESCE(sla_first_response_at, ?) WHERE id = ?',
                     [Date.now(), ticket_id],

@@ -116,6 +116,8 @@ El servidor corre en `http://localhost:3000`. En PowerShell, crea la configuraci
 
 Las migraciones crean el esquema cuando la base esta vacia y agregan cambios versionados sin renumerar archivos anteriores. El migrador se detiene si encuentra tablas de la aplicacion sin un historial `schema_migrations` utilizable; no vuelve a ejecutar alteraciones historicas sobre una base existente sin trazabilidad. La migracion `023_idempotencia_y_relaciones_cuentas.sql` agrega claves idempotentes y una relacion opcional de trazabilidad `incidencias_cuentas.ticket_id`; las incidencias de cuentas siguen siendo registros independientes y al borrar su ticket asociado la referencia queda en `NULL`, sin borrar ni resolver la incidencia.
 
+La cuenta administrativa inicial solo se crea al configurar explícitamente `ADMIN_USERNAME` y `ADMIN_PASSWORD` antes del inicio. Si esas variables faltan, el sistema no crea ninguna cuenta; si el nombre ya existe, la cuenta y su contraseña se conservan sin cambios. No uses credenciales de ejemplo en producción.
+
 ### Migraciones y adopcion de bases existentes
 
 - En una base nueva, crea una base vacia y ejecuta `npm run db:migrate`.
@@ -125,7 +127,90 @@ Las migraciones crean el esquema cuando la base esta vacia y agregan cambios ver
 - Antes de `023`, corrige en la copia cualquier `incidencias_cuentas.ticket_id` que no apunte a un ticket existente. El migrador comprueba referencias huérfanas antes de añadir la clave foránea.
 - No edites ni renombres migraciones ya aplicadas. Para cambios futuros, agrega una nueva migracion con version consecutiva.
 
-Para las pruebas de integracion, usa exclusivamente un esquema desechable cuyo nombre termine en `_test`; define `UTEA_TEST_DB_ALLOW_INTEGRATION=1` y las variables `UTEA_TEST_DB_HOST`, `UTEA_TEST_DB_PORT`, `UTEA_TEST_DB_USER`, `UTEA_TEST_DB_PASSWORD` y `UTEA_TEST_DB_NAME`, y ejecuta `npm run test:integration`. El proceso de prueba no carga `.env`, exige el sufijo `_test` y no envia notificaciones reales.
+Para las pruebas de integracion, usa exclusivamente un esquema desechable cuyo nombre termine en `_test`. El runner `scripts/run-test-env.js` carga `.env.test.local` por defecto (o una ruta indicada con `--test-config`), valida el host, puerto y nombre del esquema antes de escribir, y no carga las credenciales habituales de `.env`. Si preparaste otra ruta de entorno, pasa esa misma ruta a cada invocacion del runner; se desactivan las credenciales de correo y se requiere que `UTEA_UPLOAD_ROOT` sea un directorio absoluto exclusivo.
+
+#### Entorno MySQL aislado en Windows: preparación inicial y reanudación
+
+La instancia temporal existente usa `%TEMP%\utea-support-test-mysql-data`, puerto `33107`, esquema `utea_support_test` y configuración `%TEMP%\utea-support-test.env`. **Al reanudar, no ejecutes `initialize-test-mysql.ps1` ni `create-test-schema.js`: son exclusivamente para la primera creación y rechazan datadirs o esquemas existentes.** Todos los comandos se ejecutan desde la raíz del repositorio y validan el destino `_test` antes de migrar, iniciar el servidor o correr integraciones.
+
+##### Preparación inicial, solo para una instancia nueva
+
+Usa este bloque únicamente si aún no existe el datadir. Requiere MySQL 9.4 en la ruta indicada.
+
+```powershell
+Set-Location 'C:\xampp\htdocs\sistema-tickets-main'
+$mysql = 'C:\Program Files\MySQL\MySQL Server 9.4\bin\mysqld.exe'
+$data = Join-Path $env:TEMP 'utea-support-test-mysql-data'
+$base = Split-Path -Parent (Split-Path -Parent $mysql)
+.\scripts\initialize-test-mysql.ps1 -MySqlBinary $mysql -DataDirectory $data
+```
+
+Solo después de inicializar un datadir nuevo, inicia MySQL en una ventana dedicada:
+
+```powershell
+Set-Location 'C:\xampp\htdocs\sistema-tickets-main'
+$mysql = 'C:\Program Files\MySQL\MySQL Server 9.4\bin\mysqld.exe'
+$data = Join-Path $env:TEMP 'utea-support-test-mysql-data'
+$base = Split-Path -Parent (Split-Path -Parent $mysql)
+& $mysql --no-defaults "--basedir=$base" "--datadir=$data" --port=33107 --bind-address=127.0.0.1 --mysqlx=0 "--log-error=$(Join-Path $env:TEMP 'utea-support-test-mysql-error.log')"
+```
+
+Para crear el esquema inicial en otra ventana, confirma que la ruta de MySQL y el datadir corresponden a la instancia temporal:
+
+```powershell
+Set-Location 'C:\xampp\htdocs\sistema-tickets-main'
+$data = Join-Path $env:TEMP 'utea-support-test-mysql-data'
+$envFile = Join-Path $env:TEMP 'utea-support-test.env'
+$uploads = Join-Path $env:TEMP 'utea-support-test-uploads'
+node scripts/create-test-schema.js --host 127.0.0.1 --port 33107 --data-dir $data --schema utea_support_test --env-output $envFile --upload-root $uploads --app-port 3107
+```
+
+##### Reanudación de la instancia y uso del esquema conservado
+
+En una ventana de PowerShell, inicia el MySQL existente usando **el mismo datadir y puerto**; no vuelvas a inicializarlo ni a crear el esquema:
+
+```powershell
+Set-Location 'C:\xampp\htdocs\sistema-tickets-main'
+$mysql = 'C:\Program Files\MySQL\MySQL Server 9.4\bin\mysqld.exe'
+$data = Join-Path $env:TEMP 'utea-support-test-mysql-data'
+$base = Split-Path -Parent (Split-Path -Parent $mysql)
+if (-not (Test-Path -LiteralPath (Join-Path $data 'auto.cnf'))) { throw 'No se encontró la instancia temporal conservada.' }
+& $mysql --no-defaults "--basedir=$base" "--datadir=$data" --port=33107 --bind-address=127.0.0.1 --mysqlx=0 "--log-error=$(Join-Path $env:TEMP 'utea-support-test-mysql-error.log')"
+```
+
+En otra ventana, migra de forma idempotente. El runner carga las credenciales conservadas y falla si no puede confirmar host, puerto y esquema `_test`.
+
+```powershell
+Set-Location 'C:\xampp\htdocs\sistema-tickets-main'
+$data = Join-Path $env:TEMP 'utea-support-test-mysql-data'
+$envFile = Join-Path $env:TEMP 'utea-support-test.env'
+if (-not (Test-Path -LiteralPath $data) -or -not (Test-Path -LiteralPath $envFile)) { throw 'Falta el datadir o la configuración temporal conservada.' }
+node scripts/run-test-env.js migrate --test-config $envFile
+```
+
+En la misma ventana de pruebas, ejecuta las integraciones sobre el mismo destino confirmado:
+
+```powershell
+Set-Location 'C:\xampp\htdocs\sistema-tickets-main'
+$data = Join-Path $env:TEMP 'utea-support-test-mysql-data'
+$envFile = Join-Path $env:TEMP 'utea-support-test.env'
+if (-not (Test-Path -LiteralPath $data) -or -not (Test-Path -LiteralPath $envFile)) { throw 'Falta el datadir o la configuración temporal conservada.' }
+node scripts/run-test-env.js integration --test-config $envFile
+```
+
+Para probar la interfaz, inicia el servidor en una ventana dedicada; este comando queda en primer plano:
+
+```powershell
+Set-Location 'C:\xampp\htdocs\sistema-tickets-main'
+$data = Join-Path $env:TEMP 'utea-support-test-mysql-data'
+$envFile = Join-Path $env:TEMP 'utea-support-test.env'
+if (-not (Test-Path -LiteralPath $data) -or -not (Test-Path -LiteralPath $envFile)) { throw 'Falta el datadir o la configuración temporal conservada.' }
+node scripts/run-test-env.js start --test-config $envFile
+```
+
+#### Detener procesos temporales propios
+
+Detén cada proceso solo en la ventana dedicada donde tú lo iniciaste: pulsa `Ctrl+C` en la ventana del servidor Node y, por separado, en la ventana de `mysqld`. Confirma que el proceso corresponde a esta instancia por su comando de inicio, puerto `33107` y datadir `$data` antes de cerrarla. No finalices procesos por nombre, no cierres procesos preexistentes ni toques los servicios o puertos institucionales. Las cuentas ficticias y credenciales previamente creadas permanecen en la base; no vuelvas a ejecutar el seeder ni una inicialización al reanudar.
 
 ## Configuración de Variables de Entorno
 
@@ -138,10 +223,12 @@ DB_USER=root
 DB_PASSWORD=
 DB_NAME=tickets_db
 JWT_SECRET=cambia_esto_por_un_secreto_largo_y_aleatorio
+ADMIN_USERNAME=
+ADMIN_PASSWORD=
 PORT=3000
 ```
 
-En produccion, configura un usuario MySQL dedicado con permisos limitados y reemplaza `JWT_SECRET` por un valor aleatorio privado.
+En produccion, configura un usuario MySQL dedicado con permisos limitados, reemplaza `JWT_SECRET` por un valor aleatorio privado y establece credenciales administrativas iniciales seguras solo si necesitas crear esa cuenta.
 
 ## API Endpoints
 

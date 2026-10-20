@@ -6,15 +6,19 @@ const jwt = require('jsonwebtoken');
 const verificarToken = require('../middleware/authMiddleware');
 const { verificarRol } = require('../middleware/roleMiddleware');
 
-require('dotenv').config({ path: '../.env' });
 const SECRET = process.env.JWT_SECRET;
-const PROTECTED_ADMIN_USERNAME = (process.env.ADMIN_USERNAME || 'admin').trim();
+const PROTECTED_ADMIN_USERNAME = (process.env.ADMIN_USERNAME || '').trim();
 
 async function ensureDefaultAdmin() {
-    const username = (process.env.ADMIN_USERNAME || 'admin').trim();
-    const password = process.env.ADMIN_PASSWORD || 'admin123';
+    const username = typeof process.env.ADMIN_USERNAME === 'string'
+        ? process.env.ADMIN_USERNAME.trim()
+        : '';
+    const password = process.env.ADMIN_PASSWORD;
 
-    if (!username || !password) return;
+    if (!username || !password) {
+        console.warn('No se creó el administrador inicial porque ADMIN_USERNAME y ADMIN_PASSWORD deben configurarse explícitamente.');
+        return;
+    }
 
     try {
         const [existing] = await db.promise().query('SELECT id FROM usuarios WHERE username = ? LIMIT 1', [username]);

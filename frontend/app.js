@@ -93,8 +93,8 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
     const puedeAsignarTecnico = access.canManageAssignments(identidad);
     const puedeGestionarCuentas = access.canManageAccounts(identidad);
     const canListAllTickets = access.canListAllTickets(identidad);
-    const canManageCalendar = access.canManageAdmin(identidad);
-    if (canViewReports || puedeGestionarCuentas) {
+    const canManageCalendar = access.canAccessCalendar?.(identidad) ?? access.canManageAdmin(identidad);
+    if (canViewReports) {
         try {
             await import('./js/reporting.js');
         } catch (error) {
@@ -117,7 +117,11 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
     document.querySelectorAll('#view-clientes, #view-plantillas, #view-integraciones, #view-ajustes')
         .forEach(view => { view.hidden = !canViewAdmin; });
     const supportSummary = document.getElementById('supportSummarySection');
-    if (supportSummary) supportSummary.hidden = !canListAllTickets;
+    if (supportSummary) supportSummary.hidden = !canViewReports;
+    const staffKpis = document.getElementById('staffInstitutionalKpis');
+    if (staffKpis) staffKpis.hidden = !canViewReports;
+    const incidentCalendarWidget = document.getElementById('incidentCalendarWidget');
+    if (incidentCalendarWidget) incidentCalendarWidget.hidden = !canManageCalendar;
     const staffDashboard = document.getElementById('staffDashboardContent');
     const requesterDashboard = document.getElementById('requesterDashboardContent');
     if (staffDashboard) staffDashboard.hidden = !canListAllTickets;
@@ -149,7 +153,6 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
             admin: 'Administrador',
             superadmin: 'Superadministrador',
             tecnico: 'Técnico',
-            adminti: 'Administración TI',
             administrativo: 'Solicitante · Administrativo',
             docente: 'Solicitante · Docente',
             estudiante: 'Solicitante · Estudiante',
@@ -160,7 +163,7 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
     }
     window.UTEAIdentity = identidad;
     window.dispatchEvent(new CustomEvent('utea:identity-ready', { detail: identidad }));
-    if (canListAllTickets) {
+    if (canManageCalendar) {
         try {
             const { initializeDashboardCalendar } = await import('./dashboard.js');
             initializeDashboardCalendar();
@@ -173,74 +176,6 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
     if (puedeAsignarTecnico) {
         const asignarTecnicoContainer = document.getElementById('asignarTecnicoContainer');
         if (asignarTecnicoContainer) asignarTecnicoContainer.hidden = false;
-    }
-
-    const catalogoPorAmbiente = {
-        'Salones / Aulas': { oficina: 'AUL', categoria: 'AUL-PROYECTOR' },
-        'Laboratorio de Agronomía y Ambiental': { oficina: 'LAB', categoria: 'LAB-COMPUTADORAS' },
-        'Auditorio': { oficina: 'AUL', categoria: 'AUL-AUDIO' },
-        'Centro de Cómputo': { oficina: 'LAB', categoria: 'LAB-COMPUTADORAS' },
-        'Servicios Académicos': { oficina: 'SAC', categoria: 'SAC-MATRICULAS' },
-        'Admisión': { oficina: 'ADMIS', categoria: 'ADMIS-POSTULANTE' },
-        'Grados y Títulos': { oficina: 'GYT', categoria: 'GYT-EXPEDIENTES' },
-        'Mesa de Partes': { oficina: 'MDP', categoria: 'MDP-TRAMITE' },
-        'Administración': { oficina: 'ADM', categoria: 'ADM-EQUIPOS' },
-        'Subdirección de Derecho': { oficina: 'SUB-DER', categoria: 'SUBDER-EQUIPOS' },
-        'Subdirección de Agronomía, Ing. Ambiental e Ing. Civil': { oficina: 'SUB-ING', categoria: 'SUBING-EQUIPOS' },
-        'Subdirección de Contabilidad y Educación': { oficina: 'SUB-CED', categoria: 'SUBCED-EQUIPOS' },
-        'Subdirección de Enfermería': { oficina: 'SUB-ENF', categoria: 'SUBENF-EQUIPOS' },
-        'Tópico': { oficina: 'TOP', categoria: 'TOP-ATENCION' },
-        'Sala de Docentes': { oficina: 'SDOC', categoria: 'SDOC-EQUIPOS' },
-        'Biblioteca': { oficina: 'BIB', categoria: 'BIB-EQUIPOS' },
-        'Laboratorio de Ingeniería Civil': { oficina: 'LAB', categoria: 'LAB-COMPUTADORAS' },
-        'Asistencia': { oficina: 'ADM', categoria: 'ADM-ASISTENCIA' }
-    };
-    let oficinasCatalogoPromise;
-    const categoriasPorOficina = new Map();
-    const getAuthHeaders = () => {
-        const token = localStorage.getItem('token');
-        return token ? { Authorization: `Bearer ${token}` } : {};
-    };
-
-    async function resolverCatalogoAmbiente(ambiente) {
-        const mapeo = catalogoPorAmbiente[ambiente];
-        if (!mapeo) throw new Error('No existe un mapeo de oficina para el ambiente seleccionado');
-
-        if (!oficinasCatalogoPromise) {
-            oficinasCatalogoPromise = fetch('/api/catalogos/oficinas', {
-                headers: getAuthHeaders()
-            }).then(async response => {
-                const oficinas = await response.json();
-                if (!response.ok) throw new Error(oficinas.error || 'No se pudieron cargar las oficinas');
-                return oficinas;
-            }).catch(error => {
-                oficinasCatalogoPromise = null;
-                throw error;
-            });
-        }
-        const oficinas = await oficinasCatalogoPromise;
-        const oficina = oficinas.find(item => item.codigo === mapeo.oficina);
-        if (!oficina) throw new Error(`No se encontró la oficina ${mapeo.oficina} en el catálogo`);
-
-        if (!categoriasPorOficina.has(oficina.id)) {
-            const params = new URLSearchParams({ oficina_id: oficina.id });
-            const categoriasPromise = fetch(`/api/catalogos/categorias?${params}`, {
-                headers: getAuthHeaders()
-            }).then(async response => {
-                const categorias = await response.json();
-                if (!response.ok) throw new Error(categorias.error || 'No se pudieron cargar las categorías');
-                return categorias;
-            }).catch(error => {
-                categoriasPorOficina.delete(oficina.id);
-                throw error;
-            });
-            categoriasPorOficina.set(oficina.id, categoriasPromise);
-        }
-        const categorias = await categoriasPorOficina.get(oficina.id);
-        const categoria = categorias.find(item => item.codigo === mapeo.categoria);
-        if (!categoria) throw new Error(`No se encontró la categoría ${mapeo.categoria} para ${oficina.nombre}`);
-
-        return { oficina_id: Number(oficina.id), categoria_id: Number(categoria.id) };
     }
 
     // Saludo dinámico
@@ -340,17 +275,25 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
     }
 
     function escapeHTML(value) {
-        return String(value ?? '').replace(/[&<>"']/g, character => ({
-            '&': '&amp;',
-            '<': '&lt;',
-            '>': '&gt;',
-            '"': '&quot;',
-            "'": '&#39;'
-        })[character]);
+        return window.UTEASafeText.escapeHTML(value);
+    }
+
+    function appendUserText(parent, tagName, value, className = '') {
+        return window.UTEASafeText.append(parent, tagName, value, className);
     }
 
     window.allTickets = [];
     let ticketsRequestId = 0;
+    let ticketTransitions = null;
+    async function loadTicketTransitions() {
+        if (ticketTransitions) return ticketTransitions;
+        const response = await fetch('/api/tickets/meta/transitions');
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'No se pudieron cargar las transiciones de estado.');
+        ticketTransitions = result;
+        return ticketTransitions;
+    }
+
     let agendaMesActual = new Date();
     let agendaDiaSeleccionado = fechaHoyEnPeru();
 
@@ -385,7 +328,7 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
     }
 
     function renderCalendarioProgramacion() {
-        if (rol !== 'admin') return;
+        if (!canManageCalendar) return;
         const calendar = document.getElementById('agendaCalendario');
         const selectedList = document.getElementById('agendaTicketsDia');
         const monthTitle = document.getElementById('agendaMesActual');
@@ -480,6 +423,7 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
         const requestId = ++ticketsRequestId;
         mostrarLoading(true);
         try {
+            if (canViewAdmin) await loadTicketTransitions();
             const res = await fetch('/api/tickets', {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
@@ -499,7 +443,7 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
                 mostrarTickets(tickets.slice(0, window.limitePorPagina));
                 updateTicketPagination(tickets.length);
             }
-            if (canListAllTickets) {
+            if (canManageCalendar) {
                 actualizarDashboardKPIs(tickets);
                 renderCalendarioProgramacion();
             } else {
@@ -512,6 +456,8 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
             if (requestId === ticketsRequestId) mostrarLoading(false);
         }
     }
+
+    window.UTEARefreshTickets = obtenerTickets;
 
     let accountIncidences = [];
     let accountPlatformsChart = null;
@@ -955,6 +901,7 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
 
         window.UTEATicketTable.render(lista, ticketsMostrados, {
             canManage: canViewAdmin,
+            canResolve: ticket => ticketTransitions?.transitions?.[ticket.estado]?.includes('Solucionado') === true,
             getPriorityClass: getPrioridadClass,
             getStateClass: getEstadoClass,
             getSlaStatus,
@@ -971,8 +918,6 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
         const detalle = document.getElementById('ticketDetalle');
         if (!detalle) return;
 
-        const prioClass = getPrioridadClass(ticket.prioridad);
-        const estadoClass = getEstadoClass(ticket.estado);
         const fechaProgramada = String(ticket.fecha_programada_iso || '').slice(0, 10);
         const esTicketFinalizado = ['Solucionado', 'Cerrado'].includes(ticket.estado);
         const diagnosticoHTML = rol === 'admin' ? `
@@ -1021,56 +966,23 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
                 <div id="detalleComentarios" style="max-height:200px; overflow-y:auto; margin-bottom:16px; display:flex; flex-direction:column; gap:8px;">
                     <p style="color:var(--text-secondary); font-size:0.85rem; text-align:center;">Cargando comentarios...</p>
                 </div>
-                <div style="display:flex; gap:8px;">
-                    <textarea id="detalleNuevoComentario" placeholder="Escribe un comentario..." style="flex:1; padding:10px 14px; border:1px solid var(--border-color); border-radius:8px; font-family:inherit; font-size:0.9rem; resize:none; height:44px; box-sizing:border-box; background:#f9fafb;"></textarea>
-                    <button class="btn-primary" onclick="agregarComentarioDesdeDetalle(${ticket.id})" style="white-space:nowrap; height:44px;">
+                <form id="detalleComentarioForm" data-ticket-id="${ticket.id}" style="display:flex; gap:8px;">
+                    <textarea id="detalleNuevoComentario" placeholder="Escribe un comentario..." required style="flex:1; padding:10px 14px; border:1px solid var(--border-color); border-radius:8px; font-family:inherit; font-size:0.9rem; resize:none; height:44px; box-sizing:border-box; background:#f9fafb;"></textarea>
+                    <button type="submit" class="btn-primary" style="white-space:nowrap; height:44px;" aria-label="Enviar comentario">
                         <i class="ph ph-paper-plane-right"></i>
                     </button>
-                </div>
+                </form>
             </div>
         ` : '';
 
+        detalle.dataset.ticketId = String(ticket.id);
         detalle.innerHTML = `
-            <div class="detalle-contenido" style="padding: 10px;">
-                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px;">
-                    <h3 style="margin: 0; font-size: 1.5rem; font-weight: 600;">${escapeHTML(ticket.titulo)}</h3>
-                    <button class="close-btn" onclick="cerrarDetalle()" style="background:none; border:none; font-size:1.25rem; cursor:pointer; color:var(--text-secondary); padding:4px;"><i class="ph ph-x"></i></button>
-                </div>
-                <div style="display:flex; gap:12px; margin-bottom: 24px; flex-wrap: wrap;">
-                    <span class="t-priority ${prioClass}" style="display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:6px; font-size:0.8rem; font-weight:500;">
-                        <i class="ph-fill ph-flag"></i> ${escapeHTML(ticket.prioridad)}
-                    </span>
-                    <span class="t-status ${estadoClass}" style="display:inline-flex; align-items:center; padding:4px 8px; border-radius:6px; font-size:0.8rem; font-weight:500;">
-                        ${escapeHTML(ticket.estado)}
-                    </span>
-                    <span style="display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:6px; background:var(--bg-surface-hover); color:var(--text-secondary); font-size:0.8rem;">
-                        <i class="ph-fill ph-user"></i> ${escapeHTML(ticket.solicitante_nombre || ticket.username || 'Usuario')}
-                    </span>
-                </div>
-
-                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:16px; color:var(--text-secondary); font-size:0.9rem;">
-                    <div><strong>Oficina:</strong> ${escapeHTML(ticket.oficina_nombre || 'Sin clasificar')}</div>
-                    <div><strong>Categoría:</strong> ${escapeHTML(ticket.categoria_nombre || 'Sin clasificar')}</div>
-                    ${ticket.carrera ? `<div><strong>Carrera:</strong> ${escapeHTML(ticket.carrera)}</div>` : ''}
-                    ${ticket.bloque && ticket.ambiente ? `<div><strong>Bloque:</strong> ${escapeHTML(ticket.bloque)}<br><strong>Ambiente:</strong> ${escapeHTML(ticket.ambiente)}${ticket.aula ? `<br><strong>Aula:</strong> ${escapeHTML(ticket.aula)}` : ''}</div>` : ''}
-                    ${ticket.asignatura_area ? `<div><strong>Asignatura / área:</strong> ${escapeHTML(ticket.asignatura_area)}</div>` : ''}
-                    <div><strong>Solicitante:</strong> ${escapeHTML(ticket.solicitante_nombre || ticket.username || 'No registrado')}</div>
-                    <div><strong>Código / DNI:</strong> ${escapeHTML(ticket.codigo_universitario_dni || 'No registrado')}</div>
-                    <div><strong>Tipo:</strong> ${escapeHTML(ticket.tipo_solicitante || 'No especificado')}</div>
-                    <div><strong>Ubicación:</strong> ${escapeHTML(ticket.ubicacion || 'No especificada')}</div>
-                </div>
-
-                <div style="background:var(--bg-main); padding:14px 16px; border-radius:8px; border:1px solid var(--border-color); margin-bottom:16px; font-size:0.88rem; line-height:1.6;">
-                    <h4 style="margin:0 0 8px; font-size:0.95rem;">Acuerdos de nivel de servicio</h4>
-                    ${getSlaDetailsHTML(ticket)}
-                </div>
-                
-                <div style="background:var(--bg-main); padding:16px; border-radius:8px; border:1px solid var(--border-color); min-height:80px;">
-                    <p style="margin:0; font-size:0.95rem; color:var(--text-primary); line-height:1.5;">
-                        ${ticket.descripcion ? escapeHTML(ticket.descripcion) : '<em style="color:var(--text-secondary);">Sin descripción</em>'}
-                    </p>
-                </div>
-
+                ${window.UTEATicketDetailView.renderSummary(ticket, {
+                    escapeHTML,
+                    getPriorityClass: getPrioridadClass,
+                    getStateClass: getEstadoClass,
+                    getSlaDetailsHTML
+                })}
                 ${diagnosticoHTML}
 
                 <div style="margin-top:24px; border-top:1px solid var(--border-color); padding-top:24px;">
@@ -1119,25 +1031,37 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
         document.getElementById('overlay').style.display = 'block';
         
         // Cargar técnicos y seleccionar el actual (admin)
-        if (rol === 'admin') {
-            fetch('/api/tecnicos')
+        if (rol === 'admin' || rol === 'superadmin') {
+            const urlTecnicos = ticket.oficina_id ? `/api/tecnicos?oficina_id=${encodeURIComponent(ticket.oficina_id)}` : '/api/tecnicos';
+            fetch(urlTecnicos, {
+                headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+            })
                 .then(res => res.json())
                 .then(tecnicos => {
                     const select = document.getElementById('tecnicoAsignar');
-                    if (!select) return;
+                    if (!select || !Array.isArray(tecnicos)) return;
+                    if (!tecnicos.length) {
+                        select.innerHTML = '<option value="">No hay técnicos asignados a esta oficina</option>';
+                        select.disabled = true;
+                        return;
+                    }
+                    select.disabled = false;
+                    select.innerHTML = '<option value="">Seleccionar técnico</option>';
                     tecnicos.forEach(t => {
+                        const label = t.es_responsable ? `${t.nombre} (Responsable)` : t.nombre;
                         const option = document.createElement('option');
                         option.value = t.id;
-                        option.textContent = t.nombre;
+                        option.textContent = label;
                         if (t.id == ticket.tecnico_id) option.selected = true;
                         select.appendChild(option);
                     });
-                });
+                })
+                .catch(() => {});
         }
 
         // Cargar comentarios en el detalle (para usuarios)
         if (rol !== 'admin') {
-            cargarComentariosDetalle(ticket.id);
+            window.UTEATicketDetail?.loadComments(ticket.id);
             cargarHistorialTicket(ticket.id);
         }
 
@@ -1381,111 +1305,50 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
             const historial = await res.json();
             const contenedor = document.getElementById('ticketHistorial');
             if (!contenedor) return;
-
-            if (!historial.length) {
-                contenedor.innerHTML = '<p style="margin:0; color:var(--text-secondary); font-size:0.85rem;">Aún no hay cambios registrados en este ticket.</p>';
-                return;
-            }
-
-            contenedor.innerHTML = historial.map(item => `
-                <div style="padding:10px 12px; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-main);">
-                    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:4px;">
-                        <strong style="font-size:0.85rem;">${escapeHTML(item.accion || 'Actualización')}</strong>
-                        <small style="color:var(--text-secondary);">${new Date(item.created_at).toLocaleString()}</small>
-                    </div>
-                    <div style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:4px;">
-                        ${item.username ? `Por: ${escapeHTML(item.username)}` : 'Sistema'}
-                    </div>
-                    <div style="font-size:0.9rem; color:var(--text-primary);">${escapeHTML(item.descripcion || 'Sin detalle')}</div>
-                </div>
-            `).join('');
+            window.UTEASafeText.renderHistory(contenedor, historial);
         } catch (err) {
             // Silenciar errores del historial
         }
     }
 
-    // Cargar comentarios directamente en el panel de detalle del ticket
-    async function cargarComentariosDetalle(ticketId) {
-        try {
-            const res = await fetch(`/api/comentarios/${ticketId}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-            const comentarios = await res.json();
-            const lista = document.getElementById('detalleComentarios');
-            if (!lista) return;
-            lista.innerHTML = '';
-
-            if (comentarios.length === 0) {
-                lista.innerHTML = '<p style="color:var(--text-secondary); font-size:0.85rem; text-align:center; padding:16px 0;">No hay comentarios aún</p>';
-                return;
-            }
-
-            comentarios.forEach(c => {
-                const div = document.createElement('div');
-                div.style.cssText = 'padding:10px 12px; background:var(--bg-main); border:1px solid var(--border-color); border-radius:8px;';
-                div.innerHTML = `
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                        <span style="font-weight:600; font-size:0.85rem; color:var(--text-primary);">${c.username || 'Usuario'}</span>
-                        <small style="color:var(--text-secondary); font-size:0.75rem;">${new Date(c.fecha).toLocaleString()}</small>
-                    </div>
-                    <p style="margin:0; font-size:0.9rem; color:var(--text-primary); line-height:1.4;">${c.comentario}</p>
-                `;
-                lista.appendChild(div);
-            });
-            // Scroll al último comentario
-            lista.scrollTop = lista.scrollHeight;
-        } catch (err) {
-            // Silenciar error de carga de comentarios
-        }
-    }
-
-    // Agregar comentario desde el panel de detalle
-    window.agregarComentarioDesdeDetalle = async (ticketId) => {
-        const input = document.getElementById('detalleNuevoComentario');
-        const comentario = input?.value?.trim();
-        if (!comentario) return;
-
-        try {
-            const res = await fetch('/api/comentarios', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({ ticket_id: ticketId, comentario })
-            });
-
-            if (!res.ok) throw new Error('Error al agregar comentario');
-
-            input.value = '';
-            cargarComentariosDetalle(ticketId);
-        } catch (err) {
-            mostrarMensaje(err.message, 'error');
-        }
-    };
-
-    window.editarTicket = (ticket) => {
+    window.editarTicket = async (ticket) => {
         const editForm = document.getElementById('editarTicket');
         if (!editForm) return;
 
         document.getElementById('editTitulo').value = ticket.titulo;
         document.getElementById('editDescripcion').value = ticket.descripcion;
-        document.getElementById('editEstado').value = ticket.estado;
+        const editState = document.getElementById('editEstado');
+        const nextStates = ticketTransitions?.transitions?.[ticket.estado] || [];
+        editState.replaceChildren(
+            new Option(ticket.estado, ticket.estado),
+            ...nextStates.map(state => new Option(state, state))
+        );
+        editState.value = ticket.estado;
 
         // Cargar técnicos
-        fetch('/api/tecnicos')
+        const urlTecnicos = ticket.oficina_id ? `/api/tecnicos?oficina_id=${encodeURIComponent(ticket.oficina_id)}` : '/api/tecnicos';
+        fetch(urlTecnicos, {
+            headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        })
             .then(res => res.json())
             .then(tecnicos => {
                 const select = document.getElementById('editTecnico');
-                select.innerHTML = '<option value="">Seleccionar tecnico</option>';
+                if (!select || !Array.isArray(tecnicos)) return;
+                if (!tecnicos.length) {
+                    select.innerHTML = '<option value="">No hay técnicos asignados a esta oficina</option>';
+                    return;
+                }
+                select.innerHTML = '<option value="">Seleccionar técnico</option>';
                 tecnicos.forEach(t => {
+                    const label = t.es_responsable ? `${t.nombre} (Responsable)` : t.nombre;
                     const option = document.createElement('option');
                     option.value = t.id;
-                    option.textContent = t.nombre;
+                    option.textContent = label;
                     if (t.id == ticket.tecnico_id) option.selected = true;
                     select.appendChild(option);
                 });
-            });
+            })
+            .catch(() => {});
 
         editForm.style.display = 'block';
         document.getElementById('overlay').style.display = 'block';
@@ -1494,11 +1357,15 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
         document.getElementById('editForm').onsubmit = async (e) => {
             e.preventDefault();
             
-            const titulo = document.getElementById('editTitulo').value;
-            const descripcion = document.getElementById('editDescripcion').value;
+            const titulo = document.getElementById('editTitulo').value.trim();
+            const descripcion = document.getElementById('editDescripcion').value.trim();
             const estado = document.getElementById('editEstado').value;
             const tecnico_id = document.getElementById('editTecnico').value;
 
+            if (!titulo || !descripcion) {
+                mostrarMensaje('El asunto y la descripción no pueden estar vacíos.', 'error');
+                return;
+            }
             try {
                 const res = await fetch(`/api/tickets/${ticket.id}`, {
                     method: 'PUT',
@@ -1509,12 +1376,18 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
                     body: JSON.stringify({ titulo, descripcion, estado, tecnico_id })
                 });
 
-                if (!res.ok) throw new Error('Error al editar ticket');
+                const result = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    const error = new Error(result.error || result.message || `No se pudo editar el ticket (HTTP ${res.status}).`);
+                    error.status = res.status;
+                    throw error;
+                }
                 
                 cerrarEdicion();
-                obtenerTickets();
+                await obtenerTickets();
             } catch (err) {
                 mostrarMensaje(err.message, "error");
+                if (err.status === 409) await obtenerTickets();
             }
         };
     };
@@ -1532,8 +1405,8 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
         }
 
         try {
-            const res = await fetch(`/api/tickets/${ticketId}`, {
-                method: 'PUT',
+            const res = await fetch(`/api/tickets/${ticketId}/assignment`, {
+                method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`
@@ -1541,7 +1414,8 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
                 body: JSON.stringify({ tecnico_id })
             });
 
-            if (!res.ok) throw new Error('Error al asignar técnico');
+            const result = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(result.error || 'No se pudo asignar el técnico');
             
             cerrarDetalle();
             obtenerTickets();
@@ -1558,23 +1432,13 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
         window.ticketIdComentario = ticketId;
         
         // Cargar comentarios
-        const res = await fetch(`/api/comentarios/${ticketId}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
-        
-        const comentarios = await res.json();
-        const lista = document.getElementById('listaComentarios');
-        lista.innerHTML = '';
-        
-        comentarios.forEach(c => {
-            const div = document.createElement('div');
-            div.style.cssText = 'border-bottom:1px solid #eee; padding:10px 0;';
-            div.innerHTML = `
-                <p><strong>${c.username || 'Usuario'}:</strong> ${c.comentario}</p>
-                <small>${new Date(c.fecha).toLocaleString()}</small>
-            `;
-            lista.appendChild(div);
-        });
+        try {
+            const comentarios = await window.UTEAComments.createCommentsService().list(ticketId);
+            const lista = document.getElementById('listaComentarios');
+            if (lista) window.UTEASafeText.renderComments(lista, comentarios);
+        } catch (err) {
+            mostrarMensaje(err.message, 'error');
+        }
     };
     
     window.agregarComentario = async () => {
@@ -1582,19 +1446,9 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
         if (!comentario) return;
         
         try {
-            const res = await fetch('/api/comentarios', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({ ticket_id: window.ticketIdComentario, comentario })
-            });
-            
-            if (!res.ok) throw new Error('Error al agregar comentario');
-            
-            mostrarComentarios(window.ticketIdComentario);
+            await window.UTEAComments.createCommentsService().add(window.ticketIdComentario, comentario.trim());
             document.getElementById('nuevoComentario').value = '';
+            await window.mostrarComentarios(window.ticketIdComentario);
         } catch (err) {
             mostrarMensaje(err.message, "error");
         }
@@ -1611,101 +1465,6 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
         if (escalationModal?.style.display === 'block') closeEscalation();
     };
 
-    window.crearTicket = async (e) => {
-        e.preventDefault();
-        const btn = e.target.querySelector('button[type="submit"]');
-        mostrarLoading(true, btn);
-
-        const titulo = document.getElementById('titulo').value;
-        const descripcion = document.getElementById('descripcion').value;
-        const categoria_usuario = document.getElementById('ticketCategoria').value;
-        const impacto = document.getElementById('impacto').value;
-        const urgencia = document.getElementById('urgencia').value;
-        const bloque = document.getElementById('ticketBloque').value;
-        const ambiente = document.getElementById('ticketAmbiente').value;
-        const aulaInput = document.getElementById('ticketNumeroAula');
-        const aula = aulaInput.value ? Number(aulaInput.value) : null;
-        const ubicacion = [bloque, ambiente, aula ? `Aula ${aula}` : ''].filter(Boolean).join(' - ');
-        const solicitante_nombre = document.getElementById('solicitanteNombre').value;
-        const codigo_universitario_dni = document.getElementById('codigoUniversitarioDni').value;
-        const tipo_solicitante = document.getElementById('tipoSolicitante').value;
-        const carrera = document.getElementById('carreraTicket')?.value || '';
-        const asignatura_area = document.getElementById('asignaturaArea')?.value.trim() || '';
-        const tecnico_id = puedeAsignarTecnico ? document.getElementById('asignarTecnico').value : null;
-        const fotoIncidencia = document.getElementById('fotoIncidencia').files[0];
-        let requestKey;
-
-        try {
-            const { oficina_id, categoria_id } = await resolverCatalogoAmbiente(ambiente);
-            requestKey = pendingIdempotencyKey('ticket');
-            const res = await fetch('/api/tickets', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Idempotency-Key': requestKey
-                },
-                body: JSON.stringify({
-                    titulo,
-                    descripcion,
-                    categoria_usuario,
-                    impacto,
-                    urgencia,
-                    tecnico_id,
-                    oficina_id,
-                    categoria_id,
-                    carrera,
-                    bloque,
-                    ambiente,
-                    aula,
-                    ubicacion,
-                    solicitante_nombre,
-                    codigo_universitario_dni,
-                    tipo_solicitante,
-                    asignatura_area
-                })
-            });
-
-            const data = await res.json();
-            if (!res.ok) {
-                const error = new Error(data.error || 'Error al crear ticket');
-                error.status = res.status;
-                throw error;
-            }
-            clearPendingIdempotencyKey('ticket');
-
-            let fotoError = '';
-            if (fotoIncidencia) {
-                try {
-                    const formData = new FormData();
-                    formData.append('archivo', fotoIncidencia);
-                    const uploadRes = await fetch(`/api/adjuntos/${data.ticketId}`, {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${token}` },
-                        body: formData
-                    });
-                    const uploadData = await uploadRes.json();
-                    if (!uploadRes.ok) throw new Error(uploadData.error || 'No se pudo adjuntar la foto');
-                } catch (err) {
-                    fotoError = err.message;
-                }
-            }
-
-            mostrarMensaje(
-                fotoError ? `Ticket creado, pero no se guardó la foto: ${fotoError}` : 'Ticket creado correctamente',
-                fotoError ? 'error' : 'exito'
-            );
-            await obtenerTickets();
-            e.target.reset();
-            sincronizarCampoAsignaturaDocente();
-            document.getElementById('ticketBloque').dispatchEvent(new Event('change'));
-            closeQuickTicket();
-        } catch (err) {
-            mostrarMensaje(err.message, "error");
-        } finally {
-            mostrarLoading(false, btn);
-        }
-    };
-
     window.resolverTicket = async (id) => {
         mostrarLoading(true);
         try {
@@ -1718,12 +1477,18 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
                 body: JSON.stringify({ estado: 'Solucionado' })
             });
 
-            if (!res.ok) throw new Error('Error al resolver ticket');
-            mostrarMensaje('Ticket resuelto correctamente', 'exito');
+            const result = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                const error = new Error(result.error || result.message || `No se pudo actualizar el ticket (HTTP ${res.status}).`);
+                error.status = res.status;
+                throw error;
+            }
+            mostrarMensaje(result.mensaje || 'Ticket resuelto correctamente', 'exito');
             await obtenerTickets();
             cargarNotificaciones();
         } catch (err) {
-            mostrarMensaje(err.message, "error");
+            if (err.status === 409) await obtenerTickets();
+            mostrarMensaje(err.message, 'error');
         } finally {
             mostrarLoading(false);
         }
@@ -1980,23 +1745,27 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
     const tipoSolicitanteSelect = document.getElementById('tipoSolicitante');
     const asignaturaAreaGroup = document.getElementById('asignaturaAreaGroup');
     const asignaturaAreaInput = document.getElementById('asignaturaArea');
+    const carreraTicketGroup = document.getElementById('carreraTicketGroup');
+    const carreraTicketInput = document.getElementById('carreraTicket');
 
     function sincronizarCampoAsignaturaDocente() {
         const esDocente = tipoSolicitanteSelect?.value === 'docente';
+        const requiereCarrera = ['estudiante', 'docente'].includes(tipoSolicitanteSelect?.value);
         if (asignaturaAreaGroup) asignaturaAreaGroup.hidden = !esDocente;
+        if (carreraTicketGroup) carreraTicketGroup.hidden = !requiereCarrera;
+        if (carreraTicketInput) {
+            carreraTicketInput.required = requiereCarrera;
+            if (!requiereCarrera) carreraTicketInput.value = '';
+        }
         if (asignaturaAreaInput) {
             asignaturaAreaInput.required = Boolean(esDocente);
             if (!esDocente) asignaturaAreaInput.value = '';
         }
     }
 
+    window.sincronizarCampoAsignaturaDocente = sincronizarCampoAsignaturaDocente;
     tipoSolicitanteSelect?.addEventListener('change', sincronizarCampoAsignaturaDocente);
     sincronizarCampoAsignaturaDocente();
-    const legacyTicketForm = document.getElementById('formTicket');
-    if (legacyTicketForm && !legacyTicketForm.dataset.ticketSubmitOwner) {
-        legacyTicketForm.dataset.ticketSubmitOwner = 'legacy';
-        legacyTicketForm.addEventListener('submit', crearTicket);
-    }
     document.getElementById('accountTicketForm')?.addEventListener('submit', crearIncidenciaCuenta);
 
     // SPA Routing Logic
@@ -2007,19 +1776,7 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
             viewId = 'dashboard';
         }
 
-        document.querySelectorAll('.view-section').forEach(s => s.classList.remove('active'));
-        
-        const targetView = document.getElementById(`view-${viewId}`);
-        if(targetView) {
-            targetView.classList.add('active');
-        } else {
-            const placeholder = document.getElementById('view-placeholder');
-            if(placeholder) placeholder.classList.add('active');
-        }
-        
-        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-        const navItem = document.querySelector(`.nav-item[data-view="${viewId}"]`);
-        if(navItem) navItem.classList.add('active');
+        window.UTEAViewNavigation.activateView(document, viewId);
     };
 
     document.querySelectorAll('.nav-item[data-view]').forEach(item => {
@@ -2034,75 +1791,6 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
     });
     document.getElementById('personalEmptyNewTicket')?.addEventListener('click', () => {
         document.getElementById('quickTicketOpen')?.click();
-    });
-
-    async function loadOwnProfile() {
-        const response = await fetch('/api/auth/me/profile');
-        const profile = await response.json();
-        if (!response.ok) throw new Error(profile.error || 'No se pudo cargar el perfil');
-        document.getElementById('profileUsername').value = profile.username || '';
-        document.getElementById('profileRole').value = rolBadge?.textContent || 'Solicitante';
-        document.getElementById('profileOffice').value = profile.oficina_nombre || 'No asignada';
-        document.getElementById('profileFullName').value = profile.nombre_completo || '';
-        document.getElementById('profileEmail').value = profile.correo_institucional || '';
-    }
-
-    document.getElementById('profileNav')?.addEventListener('click', async () => {
-        try {
-            await loadOwnProfile();
-        } catch (error) {
-            mostrarMensaje(error.message, 'error');
-        }
-    });
-
-    document.getElementById('profileForm')?.addEventListener('submit', async event => {
-        event.preventDefault();
-        const form = event.currentTarget;
-        const submitButton = form.querySelector('[type="submit"]');
-        submitButton.disabled = true;
-        try {
-            const response = await fetch('/api/auth/me/profile', {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    nombre_completo: document.getElementById('profileFullName').value,
-                    correo_institucional: document.getElementById('profileEmail').value
-                })
-            });
-            const result = await response.json();
-            if (!response.ok) throw new Error(result.error || 'No se pudo actualizar el perfil');
-            mostrarMensaje(result.mensaje, 'exito');
-            await loadOwnProfile();
-        } catch (error) {
-            mostrarMensaje(error.message, 'error');
-        } finally {
-            submitButton.disabled = false;
-        }
-    });
-
-    document.getElementById('profilePasswordForm')?.addEventListener('submit', async event => {
-        event.preventDefault();
-        const form = event.currentTarget;
-        const submitButton = form.querySelector('[type="submit"]');
-        submitButton.disabled = true;
-        try {
-            const response = await fetch('/api/auth/me/password', {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    current_password: document.getElementById('profileCurrentPassword').value,
-                    new_password: document.getElementById('profileNewPassword').value
-                })
-            });
-            const result = await response.json();
-            if (!response.ok) throw new Error(result.error || 'No se pudo actualizar la contraseña');
-            form.reset();
-            mostrarMensaje(result.mensaje, 'exito');
-        } catch (error) {
-            mostrarMensaje(error.message, 'error');
-        } finally {
-            submitButton.disabled = false;
-        }
     });
 
     const quickTicketModal = document.getElementById('quickTicketModal');
@@ -2223,6 +1911,11 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
         window.modalController?.clearForms(quickTicketModal);
         setDialogOpen(quickTicketModal, quickTicketOverlay, false, quickTicketTrigger);
     };
+    window.closeQuickTicket = closeQuickTicket;
+    window.addEventListener('ticket:created', async () => {
+        closeQuickTicket();
+        await obtenerTickets();
+    });
     document.querySelector('[data-account-cancel]')?.addEventListener('click', closeQuickTicket);
     document.getElementById('quickTicketClose')?.addEventListener('click', closeQuickTicket);
     document.getElementById('quickTicketCancel')?.addEventListener('click', closeQuickTicket);
@@ -3055,18 +2748,22 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
 
             const item = document.createElement('div');
             item.style.cssText = 'display:flex; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid var(--border-color); cursor:pointer;';
-            item.innerHTML = `
-                <div style="width:36px; height:36px; border-radius:8px; background:${style.bg}; color:${style.color}; display:flex; align-items:center; justify-content:center; font-size:1.1rem; flex-shrink:0;">
-                    <i class="ph-fill ${style.icon}"></i>
-                </div>
-                <div style="flex:1; min-width:0;">
-                    <p style="margin:0; font-size:0.85rem; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                        <span style="color:var(--text-secondary);">#${t.id}</span> ${t.titulo}
-                    </p>
-                    <small style="color:var(--text-secondary); font-size:0.75rem;">${t.username || 'Usuario'} · ${tiempoTexto}</small>
-                </div>
-                <span class="t-status ${getEstadoClass(t.estado)}" style="font-size:0.75rem; white-space:nowrap;">${escapeHTML(t.estado)}</span>
-            `;
+            const icon = document.createElement('div');
+            icon.style.cssText = `width:36px; height:36px; border-radius:8px; background:${style.bg}; color:${style.color}; display:flex; align-items:center; justify-content:center; font-size:1.1rem; flex-shrink:0;`;
+            const iconElement = document.createElement('i');
+            iconElement.className = `ph-fill ${style.icon}`;
+            icon.appendChild(iconElement);
+            const content = document.createElement('div');
+            content.style.cssText = 'flex:1; min-width:0;';
+            const title = document.createElement('p');
+            title.style.cssText = 'margin:0; font-size:0.85rem; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;';
+            appendUserText(title, 'span', `#${t.id}`).style.color = 'var(--text-secondary)';
+            appendUserText(title, 'span', ` ${t.titulo || 'Sin asunto'}`);
+            appendUserText(content, 'small', `${t.username || 'Usuario'} · ${tiempoTexto}`).style.cssText = 'color:var(--text-secondary); font-size:0.75rem;';
+            content.prepend(title);
+            const state = appendUserText(item, 'span', t.estado || 'Sin estado', `t-status ${getEstadoClass(t.estado)}`);
+            state.style.cssText = 'font-size:0.75rem; white-space:nowrap;';
+            item.prepend(icon, content);
             item.onclick = () => mostrarDetalleTicket(t);
             lista.appendChild(item);
         });
@@ -3141,15 +2838,16 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
 
                 const item = document.createElement('div');
                 item.className = 'notif-item' + (n.leida ? '' : ' notif-unread');
-                item.innerHTML = `
-                    <div style="display:flex; gap:10px; align-items:flex-start;">
-                        <i class="ph-fill ${icon}" style="color:${iconColor}; font-size:1.1rem; margin-top:2px; flex-shrink:0;"></i>
-                        <div style="flex:1; min-width:0;">
-                            <p style="margin:0; font-size:0.83rem; line-height:1.3;">${n.mensaje}</p>
-                            <small style="color:var(--text-secondary);">${tiempoTexto}</small>
-                        </div>
-                    </div>
-                `;
+                const row = document.createElement('div');
+                row.style.cssText = 'display:flex; gap:10px; align-items:flex-start;';
+                const iconElement = document.createElement('i');
+                iconElement.className = `ph-fill ${icon}`;
+                iconElement.style.cssText = `color:${iconColor}; font-size:1.1rem; margin-top:2px; flex-shrink:0;`;
+                const textContainer = document.createElement('div');
+                textContainer.style.cssText = 'flex:1; min-width:0;';
+                window.UTEASafeText.appendNotification(textContainer, n.mensaje, tiempoTexto);
+                row.append(iconElement, textContainer);
+                item.appendChild(row);
 
                 // Click en la notificación → abrir el ticket
                 if (n.ticket_id) {
@@ -3196,11 +2894,11 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
             item.className = 'account-incident-row';
             const details = document.createElement('span');
             details.className = 'account-incident-main';
-            const message = document.createElement('strong');
-            message.textContent = notification.mensaje || 'Actualización de ticket';
-            const date = document.createElement('small');
-            date.textContent = formatearFechaCuenta(notification.fecha);
-            details.append(message, date);
+            window.UTEASafeText.appendNotification(
+                details,
+                notification.mensaje || 'Actualización de ticket',
+                formatearFechaCuenta(notification.fecha)
+            );
             item.appendChild(details);
             if (notification.ticket_id) {
                 item.addEventListener('click', () => {
@@ -3295,123 +2993,6 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
     window.ocultarAutoDiag = function() {
         const box = document.getElementById('autoDiagnosticBox');
         if (box) box.style.display = 'none';
-    };
-
-    // --- REPORTE MENSUAL PDF & EXCEL (CSV) ---
-    window.generarReportePDFMensual = function() {
-        if (!canViewReports) return;
-        const mesAnio = new Date().toLocaleDateString('es-PE', { month: 'long', year: 'numeric' });
-        const printWindow = window.open('', '_blank');
-        const total = window.allTickets ? window.allTickets.length : 0;
-        const resueltos = window.allTickets ? window.allTickets.filter(t => ['Solucionado', 'Cerrado'].includes(t.estado)).length : 0;
-        const pendientes = total - resueltos;
-
-        const htmlContent = `
-        <!DOCTYPE html>
-        <html lang="es">
-        <head>
-            <meta charset="UTF-8">
-            <title>Reporte Mensual TI - UTEA</title>
-            <style>
-                body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 40px; color: #1e293b; }
-                .header { text-align: center; border-bottom: 3px solid #0b3f8a; padding-bottom: 20px; margin-bottom: 30px; }
-                .header h1 { margin: 0; color: #0b3f8a; font-size: 24px; }
-                .header h2 { margin: 5px 0 0 0; color: #475569; font-size: 16px; font-weight: 500; }
-                .meta { font-size: 13px; color: #64748b; margin-top: 10px; }
-                .kpi-row { display: flex; justify-content: space-between; gap: 15px; margin-bottom: 30px; }
-                .kpi-box { flex: 1; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; text-align: center; }
-                .kpi-box h3 { margin: 0 0 5px 0; font-size: 13px; color: #64748b; text-transform: uppercase; }
-                .kpi-box p { margin: 0; font-size: 22px; font-weight: bold; color: #0b3f8a; }
-                table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 13px; }
-                th, td { border: 1px solid #cbd5e1; padding: 10px; text-align: left; }
-                th { background-color: #f1f5f9; color: #0f172a; font-weight: 600; }
-                .footer { margin-top: 40px; text-align: center; font-size: 12px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 15px; }
-            </style>
-        </head>
-        <body>
-            <div class="header">
-                <h1>UNIVERSIDAD TECNOLÓGICA DE LOS ANDES</h1>
-                <h2>Oficina de Tecnologías de Información - Sede Andahuaylas</h2>
-                <div class="meta">Reporte Mensual de Incidencias TI • Periodo: ${mesAnio.toUpperCase()} • Generado el ${new Date().toLocaleDateString('es-PE')}</div>
-            </div>
-
-            <div class="kpi-row">
-                <div class="kpi-box"><h3>Total Incidencias</h3><p>${total}</p></div>
-                <div class="kpi-box"><h3>Atendidos / Resueltos</h3><p>${resueltos}</p></div>
-                <div class="kpi-box"><h3>En Proceso / Pendientes</h3><p>${pendientes}</p></div>
-                <div class="kpi-box"><h3>Tasa de Resolución</h3><p>${total ? Math.round((resueltos/total)*100) : 100}%</p></div>
-            </div>
-
-            <h3>Resumen Ejecutivo de Tickets Atendidos</h3>
-            <table>
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>Solicitante</th>
-                        <th>Oficina / Área</th>
-                        <th>Asunto</th>
-                        <th>Prioridad</th>
-                        <th>Estado</th>
-                        <th>Fecha</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${(window.allTickets || []).slice(0, 50).map(t => `
-                        <tr>
-                            <td>#${t.id}</td>
-                            <td>${escapeHTML(t.solicitante_nombre || t.username || 'N/A')}</td>
-                            <td>${escapeHTML(t.oficina_nombre || 'N/A')}</td>
-                            <td>${escapeHTML(t.titulo)}</td>
-                            <td>${escapeHTML(t.prioridad)}</td>
-                            <td>${escapeHTML(t.estado)}</td>
-                            <td>${new Date(t.fecha_creacion).toLocaleDateString('es-PE')}</td>
-                        </tr>
-                    `).join('')}
-                </tbody>
-            </table>
-
-            <div class="footer">
-                AuraDesk ITSM Platform • Universidad Tecnológica de los Andes Sede Andahuaylas
-            </div>
-            <script>window.onload = function() { window.print(); }</script>
-        </body>
-        </html>
-        `;
-        printWindow.document.write(htmlContent);
-        printWindow.document.close();
-    };
-
-    window.exportarTicketsExcel = function() {
-        if (!canViewReports) return;
-        if (!window.allTickets || !window.allTickets.length) {
-            if (window.mostrarMensaje) window.mostrarMensaje('No hay tickets disponibles para exportar', 'error');
-            return;
-        }
-
-        const headers = ['ID', 'Asunto', 'Solicitante', 'DNI/Codigo', 'Tipo', 'Oficina', 'Categoria', 'Carrera', 'Estado', 'Prioridad', 'Fecha Creacion'];
-        const rows = window.allTickets.map(t => [
-            t.id,
-            `"${(t.titulo || '').replace(/"/g, '""')}"`,
-            `"${(t.solicitante_nombre || t.username || '').replace(/"/g, '""')}"`,
-            `"${(t.codigo_universitario_dni || '').replace(/"/g, '""')}"`,
-            `"${(t.tipo_solicitante || '').replace(/"/g, '""')}"`,
-            `"${(t.oficina_nombre || '').replace(/"/g, '""')}"`,
-            `"${(t.categoria_nombre || '').replace(/"/g, '""')}"`,
-            `"${(t.carrera || '').replace(/"/g, '""')}"`,
-            `"${(t.estado || '').replace(/"/g, '""')}"`,
-            `"${(t.prioridad || '').replace(/"/g, '""')}"`,
-            `"${new Date(t.fecha_creacion).toLocaleString('es-PE')}"`
-        ]);
-
-        const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-        const encodedUri = encodeURI(csvContent);
-        const link = document.createElement('a');
-        link.setAttribute('href', encodedUri);
-        link.setAttribute('download', `Tickets_UTEA_TI_${new Date().toISOString().slice(0, 10)}.csv`);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        if (window.mostrarMensaje) window.mostrarMensaje('Exportación a Excel (CSV) completada correctamente', 'exito');
     };
 
     async function cargarMetricasReportes() {
@@ -3555,18 +3136,25 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
     }
 
     function getReportResolvedTickets(monthKey) {
-        return getReportCases().flatMap(ticket => {
-            const monthResolutions = reportResolvedTimestamps(ticket)
-                .filter(timestamp => window.ReportMetrics.month(timestamp) === monthKey);
-            return monthResolutions.length
-                ? [{ ...ticket, reportResolvedAt: monthResolutions[monthResolutions.length - 1] }]
-                : [];
-        });
+        return window.ReportMetrics.ticketsResolvedDuringMonth(
+            getReportCases(),
+            monthKey,
+            reportResolvedTimestamps
+        );
     }
 
     function isClosedReportTicket(ticket) {
         return ['Solucionado', 'Cerrado', 'Resuelto'].includes(ticket.estado) ||
             ticket.account_estado === 'RESUELTO';
+    }
+
+    function getMonthlyReportMetrics(monthKey) {
+        return window.ReportMetrics.monthlyResolutionMetrics(
+            getReportCases(),
+            monthKey,
+            reportResolvedTimestamps,
+            isClosedReportTicket
+        );
     }
 
     function reportMeanElapsedHours(tickets, endField) {
@@ -3663,43 +3251,56 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
         });
     }
 
-    function renderReportDetails(tickets, monthKey) {
-        const body = document.getElementById('reportTicketsBody');
+    function renderReportTicketTable(tickets, monthKey, {
+        bodyId,
+        countId,
+        descriptionId,
+        includeResolution = false
+    }) {
+        const body = document.getElementById(bodyId);
         if (!body) return;
         body.replaceChildren();
-        const countBadge = document.getElementById('reportMonthCount');
+        const countBadge = document.getElementById(countId);
         if (countBadge) countBadge.textContent = `${tickets.length} ${tickets.length === 1 ? 'incidencia' : 'incidencias'}`;
-        const description = document.getElementById('reportMonthDescription');
-        if (description) description.textContent = `Tickets registrados en ${reportMonthLabel(monthKey)}.`;
+        const description = document.getElementById(descriptionId);
+        if (description) {
+            description.textContent = includeResolution
+                ? `Casos resueltos durante ${reportMonthLabel(monthKey)}, aunque se hayan registrado antes.`
+                : `Tickets registrados en ${reportMonthLabel(monthKey)}.`;
+        }
 
         if (!tickets.length) {
             const row = body.insertRow();
             const cell = row.insertCell();
-            cell.colSpan = 7;
+            cell.colSpan = includeResolution ? 8 : 7;
             cell.className = 'report-empty-cell';
-            cell.textContent = 'No hay incidencias registradas en este mes.';
+            cell.textContent = includeResolution
+                ? 'No hay incidencias resueltas durante este mes.'
+                : 'No hay incidencias registradas en este mes.';
             return;
         }
 
         tickets.forEach(ticket => {
             const row = body.insertRow();
-            const createdTimestamp = reportTimestamp(ticket.fecha_creacion);
-            const createdAt = new Date(createdTimestamp);
-            const dateLabel = Number.isFinite(createdAt.getTime())
-                ? createdAt.toLocaleDateString('es-PE', {
+            const formatDate = value => {
+                const parsed = new Date(reportTimestamp(value));
+                return Number.isFinite(parsed.getTime())
+                    ? parsed.toLocaleDateString('es-PE', {
                     day: '2-digit',
                     month: 'short',
                     year: 'numeric',
                     timeZone: 'America/Lima'
                 })
                 : '—';
+            };
             [
                 `${ticket.reportReference || `#${ticket.id}`} · ${ticket.titulo || 'Sin asunto'}`,
                 ticket.solicitante_nombre || ticket.username || '—',
                 ticket.categoria_usuario || ticket.categoria_nombre || 'Sin categoría',
                 ticket.prioridad || '—',
                 ticket.estado || '—',
-                dateLabel
+                formatDate(ticket.fecha_creacion),
+                ...(includeResolution ? [formatDate(ticket.reportResolvedAt)] : [])
             ].forEach(value => {
                 row.insertCell().textContent = value;
             });
@@ -3730,6 +3331,20 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
         });
     }
 
+    function renderReportDetails(tickets, resolved, monthKey) {
+        renderReportTicketTable(tickets, monthKey, {
+            bodyId: 'reportTicketsBody',
+            countId: 'reportMonthCount',
+            descriptionId: 'reportMonthDescription'
+        });
+        renderReportTicketTable(resolved, monthKey, {
+            bodyId: 'reportResolvedTicketsBody',
+            countId: 'reportResolvedMonthCount',
+            descriptionId: 'reportResolvedMonthDescription',
+            includeResolution: true
+        });
+    }
+
     function renderMonthlyReport() {
         if (!reportMonthSelect) return;
         const monthKey = reportMonthSelect.value || currentReportMonth();
@@ -3749,7 +3364,7 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
         renderReportBars('repCategoriasList', aggregateReportTickets(tickets, 'categoria_reporte', 'Sin categoría'), true);
         renderReportBars('repOficinasList', aggregateReportTickets(tickets, 'oficina_nombre', 'Sin oficina'));
         renderReportBars('repTecnicosList', aggregateReportTickets(tickets, 'tecnico', 'Sin asignar'));
-        renderReportDetails(tickets, monthKey);
+        renderReportDetails(tickets, resolved, monthKey);
     }
 
     const summaryMonthSelect = document.getElementById('summaryMonthSelect');
@@ -3829,9 +3444,11 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
         if (!canListAllTickets || !summaryMonthSelect) return;
         const monthKey = summaryMonthSelect.value || currentReportMonth();
         const tickets = getReportTicketsForMonth(monthKey);
-        const closed = getReportResolvedTickets(monthKey);
+        const monthlyMetrics = getMonthlyReportMetrics(monthKey);
+        const closed = monthlyMetrics.resolvedDuringMonth;
+        const cohortResolved = monthlyMetrics.registeredResolved;
         const open = tickets.filter(ticket => !isClosedReportTicket(ticket));
-        const progress = tickets.length ? Math.min(100, Math.round(closed.length * 100 / tickets.length)) : 0;
+        const progress = monthlyMetrics.registeredResolutionPct;
         const duration = reportMeanElapsedHours(closed, 'reportResolvedAt');
         const firstResponse = reportMeanElapsedHours(
             tickets.filter(ticket => reportTimestamp(ticket.sla_first_response_at) > 0),
@@ -3843,12 +3460,12 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
         document.getElementById('summaryResolvedRate').textContent = `Resueltos durante ${reportMonthLabel(monthKey)}`;
         document.getElementById('summaryOpen').textContent = String(open.length);
         document.getElementById('summaryResolutionTime').textContent = formatReportDuration(duration);
-        document.getElementById('supportProgressRate').textContent = String(closed.length);
-        document.getElementById('supportProgressResolved').textContent = String(closed.length);
+        document.getElementById('supportProgressRate').textContent = `${progress}%`;
+        document.getElementById('supportProgressResolved').textContent = String(cohortResolved.length);
         document.getElementById('supportProgressOpen').textContent = String(open.length);
         const ring = document.getElementById('supportProgressRing');
         ring.style.setProperty('--progress', `${progress}%`);
-        ring.setAttribute('aria-label', `${closed.length} casos resueltos durante ${reportMonthLabel(monthKey)}`);
+        ring.setAttribute('aria-label', `${progress}% de los casos registrados en ${reportMonthLabel(monthKey)} están resueltos`);
         document.getElementById('supportFirstResponse').textContent =
             `Tiempo medio de primera atención: ${formatReportDuration(firstResponse)}.`;
         document.getElementById('frequentFailuresCaption').textContent =
@@ -3916,15 +3533,7 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
     }
 
     function getReportTicketsForMonth(monthKey) {
-        const selectedMonth = reportMonthSelect?.value;
-        if (reportMonthSelect && selectedMonth !== monthKey) {
-            const originalMonth = selectedMonth;
-            reportMonthSelect.value = monthKey;
-            const tickets = getReportTickets();
-            reportMonthSelect.value = originalMonth;
-            return tickets;
-        }
-        return getReportTickets();
+        return getReportCases().filter(ticket => reportTicketMonth(ticket) === monthKey);
     }
 
     function openDashboardCategory(category) {
@@ -3976,15 +3585,7 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
 
     document.getElementById('repCategoriasList')?.addEventListener('click', event => {
         const categoryButton = event.target.closest('[data-report-category]');
-        const searchInput = document.getElementById('searchInput');
-        if (!categoryButton || !searchInput) return;
-        if (categoryButton.dataset.reportCategory === 'Cuentas institucionales') {
-            window.cambiarVista('tickets');
-            document.getElementById('accountIncidentsList')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            return;
-        }
-        searchInput.value = categoryButton.dataset.reportCategory;
-        searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+        if (categoryButton) openDashboardCategory(categoryButton.dataset.reportCategory);
     });
 
     document.getElementById('reportTicketsBody')?.addEventListener('click', event => {
@@ -4022,90 +3623,46 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
         window.filtrar('activos', { currentTarget: activeFilter });
     });
 
-    function reportCsvCell(value) {
-        return `"${String(value ?? '').replace(/"/g, '""')}"`;
+    function reportExportContext(monthKey) {
+        const tickets = getReportTickets();
+        const resolved = getReportResolvedTickets(monthKey);
+        const metrics = getMonthlyReportMetrics(monthKey);
+        return {
+            monthLabel: reportMonthLabel(monthKey),
+            tickets,
+            resolved,
+            open: tickets.filter(ticket => !isClosedReportTicket(ticket)),
+            metrics: {
+                ...metrics,
+                resolutionHours: reportMeanElapsedHours(resolved, 'reportResolvedAt')
+            },
+            formatDuration: formatReportDuration,
+            timestamp: reportTimestamp
+        };
     }
 
     window.exportarTicketsExcel = function() {
         if (!canViewReports) return;
         const monthKey = reportMonthSelect?.value || currentReportMonth();
-        const tickets = getReportTickets();
-        if (!tickets.length) {
+        const context = reportExportContext(monthKey);
+        if (!context.tickets.length) {
             mostrarMensaje('No hay tickets registrados en el mes seleccionado', 'error');
             return;
         }
-        const resolved = getReportResolvedTickets(monthKey);
-        const open = tickets.filter(ticket => !isClosedReportTicket(ticket));
-        const rows = [
-            ['Reporte mensual de soporte UTEA', reportMonthLabel(monthKey)],
-            ['Casos únicos registrados durante el mes', tickets.length],
-            ['Casos resueltos durante el mes', resolved.length],
-            ['Casos registrados este mes que siguen abiertos', open.length],
-            ['Tiempo medio de resolución en el mes', formatReportDuration(reportMeanElapsedHours(resolved, 'reportResolvedAt'))],
-            [],
-            ['Ticket / cuenta vinculados', 'Asunto', 'Solicitante', 'Oficina', 'Categoría', 'Técnico', 'Prioridad', 'Estado', 'Fecha de registro'],
-            ...tickets.map(ticket => [
-                ticket.reportReference || `#${ticket.id}`, ticket.titulo, ticket.solicitante_nombre || ticket.username,
-                ticket.oficina_nombre, ticket.categoria_nombre, ticket.tecnico,
-                ticket.prioridad, ticket.estado, new Date(reportTimestamp(ticket.fecha_creacion)).toLocaleString('es-PE', { timeZone: 'America/Lima' })
-            ])
-        ];
-        const csv = `\uFEFF${rows.map(row => row.map(reportCsvCell).join(',')).join('\r\n')}`;
-        const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `Reporte_UTEA_${monthKey}.csv`;
-        link.click();
-        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+        if (!window.UTEAReportExports) throw new Error('El módulo de exportación de reportes no está disponible.');
+        const csv = window.UTEAReportExports.buildCsv(context);
+        window.UTEAReportExports.downloadCsv(csv, monthKey);
     };
 
     window.generarReportePDFMensual = function() {
         if (!canViewReports) return;
         const monthKey = reportMonthSelect?.value || currentReportMonth();
-        const tickets = getReportTickets();
-        const resolved = getReportResolvedTickets(monthKey);
-        const open = tickets.filter(ticket => !isClosedReportTicket(ticket));
-        const printWindow = window.open('', '_blank');
-        if (!printWindow) {
+        const context = reportExportContext(monthKey);
+        if (!window.UTEAReportExports) throw new Error('El módulo de exportación de reportes no está disponible.');
+        const html = window.UTEAReportExports.buildPdfHtml(context);
+        if (!window.UTEAReportExports.openPdf(html)) {
             mostrarMensaje('Permite las ventanas emergentes para generar el reporte PDF', 'error');
-            return;
         }
-        const ticketRows = tickets.map(ticket => `
-            <tr>
-                <td>${escapeHTML(ticket.reportReference || `#${ticket.id}`)}</td>
-                <td>${escapeHTML(ticket.solicitante_nombre || ticket.username || '—')}</td>
-                <td>${escapeHTML(ticket.categoria_nombre || 'Sin categoría')}</td>
-                <td>${escapeHTML(ticket.titulo || 'Sin asunto')}</td>
-                <td>${escapeHTML(ticket.prioridad || '—')}</td>
-                <td>${escapeHTML(ticket.estado || '—')}</td>
-                <td>${escapeHTML(ticket.fecha_creacion ? new Date(ticket.fecha_creacion).toLocaleDateString('es-PE', { timeZone: 'America/Lima' }) : '—')}</td>
-            </tr>
-        `).join('');
-        printWindow.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8">
-            <title>Reporte UTEA ${escapeHTML(reportMonthLabel(monthKey))}</title>
-            <style>
-                body{font-family:Arial,sans-serif;margin:32px;color:#1e293b}
-                header{text-align:center;border-bottom:3px solid #0b3f8a;padding-bottom:16px;margin-bottom:24px}
-                h1{color:#0b3f8a;font-size:22px;margin:0}header p{color:#475569;margin:8px 0 0}
-                .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:20px 0}
-                .kpi{padding:14px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc}
-                .kpi span{display:block;color:#475569;font-size:12px}.kpi strong{display:block;color:#0b3f8a;font-size:22px;margin-top:6px}
-                table{width:100%;border-collapse:collapse;font-size:11px;margin-top:16px}
-                th,td{border:1px solid #cbd5e1;padding:7px;text-align:left}th{background:#f1f5f9}
-            </style></head><body>
-            <header><h1>Universidad Tecnológica de los Andes</h1>
-            <p>Reporte mensual de soporte · Sede Andahuaylas · ${escapeHTML(reportMonthLabel(monthKey))}</p></header>
-            <div class="kpis">
-                <div class="kpi"><span>Casos únicos registrados</span><strong>${tickets.length}</strong></div>
-                <div class="kpi"><span>Casos resueltos durante el mes</span><strong>${resolved.length}</strong></div>
-                <div class="kpi"><span>Registrados en el mes que siguen abiertos</span><strong>${open.length}</strong></div>
-                <div class="kpi"><span>Tiempo medio de resolución del mes</span><strong>${escapeHTML(formatReportDuration(reportMeanElapsedHours(resolved, 'reportResolvedAt')))}</strong></div>
-            </div>
-            <h2>Detalle de incidencias</h2>
-            <table><thead><tr><th>ID</th><th>Solicitante</th><th>Categoría</th><th>Asunto</th><th>Prioridad</th><th>Estado</th><th>Registro</th></tr></thead>
-            <tbody>${ticketRows || '<tr><td colspan="7">No hay incidencias registradas en este periodo.</td></tr>'}</tbody></table>
-            <script>window.onload=()=>window.print();</script></body></html>`);
-        printWindow.document.close();
     };
 
     // Escuchar navegación para actualizar métricas de reportes

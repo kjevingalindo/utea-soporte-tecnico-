@@ -44,6 +44,17 @@ test('requires teacher subject and validates applicant type and career', () => {
     assert.ok(validateTicketCreation(validPayload({ carrera: 'Otra carrera' })).error);
 });
 
+test('allows office and administrative requesters without a fictitious career', () => {
+    for (const tipo_solicitante of ['administrativo', 'oficina']) {
+        const result = validateTicketCreation(validPayload({
+            tipo_solicitante,
+            carrera: ''
+        }));
+        assert.equal(result.error, undefined, tipo_solicitante);
+        assert.equal(result.value.carrera, null);
+    }
+});
+
 test('validates category IDs, block/environment relationship, and classroom-only number', () => {
     assert.ok(validateTicketCreation(validPayload({ oficina_id: '1e0' })).error);
     assert.ok(validateTicketCreation(validPayload({ bloque: 'Bloque A', ambiente: 'Administración' })).error);
@@ -61,4 +72,10 @@ test('validates category IDs, block/environment relationship, and classroom-only
 test('rejects manipulated impact and urgency', () => {
     assert.ok(validateTicketCreation(validPayload({ impacto: 'Extreme' })).error);
     assert.ok(validateTicketCreation(validPayload({ urgencia: 'Critical' })).error);
+});
+
+test('rejects unpermitted fields instead of accepting client-controlled ownership or metadata', () => {
+    assert.match(validateTicketCreation(validPayload({ user_id: 999 })).error, /Campo no permitido: user_id/);
+    assert.match(validateTicketCreation(validPayload({ rol: 'admin' })).error, /Campo no permitido: rol/);
+    assert.match(validateTicketCreation(null).error, /cuerpo/);
 });

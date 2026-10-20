@@ -4,16 +4,13 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
-const enabled = process.env.UTEA_TEST_DB_ALLOW_INTEGRATION === '1' &&
-    /_test$/i.test(process.env.UTEA_TEST_DB_NAME || '') &&
-    Boolean(process.env.UTEA_TEST_DB_HOST && process.env.UTEA_TEST_DB_USER);
+const integrationEnabled = process.env.UTEA_TEST_DB_ALLOW_INTEGRATION === '1';
+if (integrationEnabled) {
+    require('../../backend/config/databaseConfig').applyTestDatabaseEnvironment();
+}
+const enabled = integrationEnabled;
 
 if (enabled) {
-    process.env.DB_HOST = process.env.UTEA_TEST_DB_HOST;
-    process.env.DB_PORT = process.env.UTEA_TEST_DB_PORT || '3306';
-    process.env.DB_USER = process.env.UTEA_TEST_DB_USER;
-    process.env.DB_PASSWORD = process.env.UTEA_TEST_DB_PASSWORD || '';
-    process.env.DB_NAME = process.env.UTEA_TEST_DB_NAME;
     process.env.JWT_SECRET = 'utea-integration-test-only-secret';
 }
 
@@ -33,29 +30,66 @@ test('ticket API creation idempotency, server validation, concurrent transitions
     const ticketRoutes = require('../../backend/routes/tickets');
     const statsRoutes = require('../../backend/routes/stats');
     const accountRoutes = require('../../backend/routes/cuentas.routes');
+    const authRoutes = require('../../backend/routes/auth');
+    const commentRoutes = require('../../backend/routes/comments');
+    const attachmentRoutes = require('../../backend/routes/adjuntos');
     const accountService = require('../../backend/services/cuentas.service');
+    const [[databaseIdentity]] = await db.promise().query(
+        'SELECT DATABASE() AS databaseName, @@port AS serverPort'
+    );
+    assert.equal(databaseIdentity.databaseName, process.env.UTEA_TEST_DB_NAME);
+    assert.equal(Number(databaseIdentity.serverPort), Number(process.env.UTEA_TEST_DB_PORT));
+    const [[baselineKpis]] = await db.promise().query(`
+        SELECT
+            COUNT(CASE WHEN sla_response_due_at IS NOT NULL THEN 1 END) AS responseDueCount,
+            SUM(CASE WHEN sla_response_due_at IS NOT NULL
+                      AND sla_first_response_at IS NOT NULL
+                      AND sla_first_response_at <= sla_response_due_at THEN 1 ELSE 0 END) AS responseMetCount,
+            COUNT(CASE WHEN sla_resolution_due_at IS NOT NULL
+                        AND estado IN ('Solucionado', 'Cerrado') THEN 1 END) AS resolutionDueCount,
+            SUM(CASE WHEN sla_resolution_due_at IS NOT NULL
+                      AND estado IN ('Solucionado', 'Cerrado')
+                      AND sla_resolved_at IS NOT NULL
+                      AND sla_resolved_at <= sla_resolution_due_at THEN 1 ELSE 0 END) AS resolutionMetCount
+        FROM tickets
+    `);
     const app = express();
     app.use(express.json());
     app.use('/api/tickets', ticketRoutes);
     app.use('/api/stats', statsRoutes);
     app.use('/api/cuentas', accountRoutes);
+    app.use('/api/auth', authRoutes);
+    app.use('/api/comentarios', commentRoutes);
+    app.use('/api/adjuntos', attachmentRoutes);
 
     const server = app.listen(0, '127.0.0.1');
     let evidenceFilePath;
     let evidenceIncidentId;
+    const createdTicketIds = [];
+    const createdUserIds = [];
     await new Promise((resolve, reject) => {
         server.once('listening', resolve);
         server.once('error', reject);
     });
     const suffix = crypto.randomUUID();
+    const expectedKpi = (metCount, dueCount) => dueCount
+        ? Number((((Number(metCount) + 1) * 100) / (Number(dueCount) + 1)).toFixed(1))
+        : 100;
     t.after(async () => {
         if (evidenceFilePath) await fs.promises.unlink(evidenceFilePath).catch(() => {});
-        if (evidenceIncidentId) {
-            await new Promise(resolve => db.query(
-                'DELETE FROM incidencias_cuentas WHERE id = ?',
-                [evidenceIncidentId],
-                () => resolve()
-            ));
+        if (evidenceIncidentId) await db.promise().query(
+            'DELETE FROM incidencias_cuentas WHERE id = ?',
+            [evidenceIncidentId]
+        );
+        if (createdTicketIds.length) {
+            await db.promise().query('DELETE FROM ticket_historial WHERE ticket_id IN (?)', [createdTicketIds]).catch(err => { console.error('ADVERTENCIA: Error al limpiar ticket_historial en prueba de integración:', err); });
+            await db.promise().query('DELETE FROM ticket_adjuntos WHERE ticket_id IN (?)', [createdTicketIds]).catch(err => { console.error('ADVERTENCIA: Error al limpiar ticket_adjuntos en prueba de integración:', err); });
+            await db.promise().query('DELETE FROM comentarios WHERE ticket_id IN (?)', [createdTicketIds]).catch(err => { console.error('ADVERTENCIA: Error al limpiar comentarios en prueba de integración:', err); });
+            await db.promise().query('DELETE FROM tickets WHERE id IN (?)', [createdTicketIds]).catch(err => { console.error('ADVERTENCIA: Error al limpiar tickets en prueba de integración:', err); });
+        }
+        if (createdUserIds.length) {
+            await db.promise().query('DELETE FROM incidencias_cuentas WHERE usuario_id IN (?)', [createdUserIds]);
+            await db.promise().query('DELETE FROM usuarios WHERE id IN (?)', [createdUserIds]);
         }
         await accountService.close();
         await new Promise(resolve => server.close(resolve));
@@ -69,6 +103,7 @@ test('ticket API creation idempotency, server validation, concurrent transitions
             (error, result) => error ? reject(error) : resolve([result])
         );
     });
+    createdUserIds.push(accountOwner.insertId);
     const [unrelatedUser] = await new Promise((resolve, reject) => {
         db.query(
             'INSERT INTO usuarios (username, password, rol) VALUES (?, ?, ?)',
@@ -76,6 +111,7 @@ test('ticket API creation idempotency, server validation, concurrent transitions
             (error, result) => error ? reject(error) : resolve([result])
         );
     });
+    createdUserIds.push(unrelatedUser.insertId);
     const [userResult] = await new Promise((resolve, reject) => {
         db.query(
             'INSERT INTO usuarios (username, password, rol) VALUES (?, ?, ?)',
@@ -83,6 +119,7 @@ test('ticket API creation idempotency, server validation, concurrent transitions
             (error, result) => error ? reject(error) : resolve([result])
         );
     });
+    createdUserIds.push(userResult.insertId);
     const [[category]] = await new Promise((resolve, reject) => {
         db.query(
             `SELECT c.id AS categoria_id, c.oficina_id
@@ -114,8 +151,13 @@ test('ticket API creation idempotency, server validation, concurrent transitions
     });
     evidenceIncidentId = incidentResult.insertId;
     const evidenceFileName = `${crypto.randomUUID()}.pdf`;
-    evidenceFilePath = path.resolve(__dirname, '../../backend/uploads/cuentas', evidenceFileName);
+    evidenceFilePath = path.resolve(
+        process.env.UTEA_UPLOAD_ROOT || path.resolve(__dirname, '../../backend/uploads'),
+        'cuentas',
+        evidenceFileName
+    );
     const evidenceBytes = Buffer.from('%PDF-1.4\nFictitious test evidence\n%%EOF\n');
+    await fs.promises.mkdir(path.dirname(evidenceFilePath), { recursive: true });
     await fs.promises.writeFile(evidenceFilePath, evidenceBytes);
     const [evidenceResult] = await new Promise((resolve, reject) => {
         db.query(
@@ -136,7 +178,7 @@ test('ticket API creation idempotency, server validation, concurrent transitions
     assert.equal(unrelatedDownload.status, 403);
 
     const ticketPayload = {
-        titulo: 'Ticket de integración',
+        titulo: `Ticket de integración ${suffix}`,
         descripcion: 'Solicitud ficticia de regresión',
         categoria_usuario: 'Internet',
         impacto: 'Medio',
@@ -176,6 +218,7 @@ test('ticket API creation idempotency, server validation, concurrent transitions
     assert.ok(createRequests.every(response => [200, 201].includes(response.status)));
     assert.equal(createResponses[0].ticketId, createResponses[1].ticketId);
     const ticketId = createResponses[0].ticketId;
+    createdTicketIds.push(ticketId);
     const [[{ ticketCount }]] = await new Promise((resolve, reject) => {
         db.query(
             'SELECT COUNT(*) AS ticketCount FROM tickets WHERE user_id = ? AND idempotency_key = ?',
@@ -184,6 +227,86 @@ test('ticket API creation idempotency, server validation, concurrent transitions
         );
     });
     assert.equal(Number(ticketCount), 1);
+
+    const requesterAHeaders = { ...headers, Authorization: `Bearer ${ownerToken}` };
+    const requesterBHeaders = { ...headers, Authorization: `Bearer ${unrelatedToken}` };
+    const createForRequester = async (requesterHeaders, key) => {
+        const response = await fetch(`${baseUrl}/api/tickets`, {
+            method: 'POST',
+            headers: { ...requesterHeaders, 'Idempotency-Key': key },
+            body: JSON.stringify(ticketPayload)
+        });
+        assert.ok([200, 201].includes(response.status));
+        return (await response.json()).ticketId;
+    };
+    const requesterATicketId = await createForRequester(requesterAHeaders, `owner-${suffix}`);
+    const requesterBTicketId = await createForRequester(requesterBHeaders, `other-${suffix}`);
+    createdTicketIds.push(requesterATicketId, requesterBTicketId);
+    const [requesterATicketsResponse, requesterBTicketsResponse] = await Promise.all([
+        fetch(`${baseUrl}/api/tickets`, { headers: requesterAHeaders }),
+        fetch(`${baseUrl}/api/tickets`, { headers: requesterBHeaders })
+    ]);
+    const [requesterATickets, requesterBTickets] = await Promise.all([
+        requesterATicketsResponse.json(),
+        requesterBTicketsResponse.json()
+    ]);
+    assert.ok(requesterATickets.some(ticket => Number(ticket.id) === Number(requesterATicketId)));
+    assert.ok(requesterATickets.every(ticket => Number(ticket.user_id) === Number(accountOwner.insertId)));
+    assert.ok(requesterBTickets.some(ticket => Number(ticket.id) === Number(requesterBTicketId)));
+    assert.ok(requesterBTickets.every(ticket => Number(ticket.user_id) === Number(unrelatedUser.insertId)));
+
+    const [otherTicketHistory, otherTicketComments, otherTicketEvidence] = await Promise.all([
+        fetch(`${baseUrl}/api/tickets/${requesterBTicketId}/historial`, { headers: requesterAHeaders }),
+        fetch(`${baseUrl}/api/comentarios/${requesterBTicketId}`, { headers: requesterAHeaders }),
+        fetch(`${baseUrl}/api/adjuntos/${requesterBTicketId}`, { headers: requesterAHeaders })
+    ]);
+    assert.deepEqual(
+        [otherTicketHistory.status, otherTicketComments.status, otherTicketEvidence.status],
+        [403, 403, 403]
+    );
+
+    const profileUrl = `${baseUrl}/api/auth/me/profile`;
+    const ownProfileResponse = await fetch(profileUrl, { headers: requesterAHeaders });
+    const ownProfile = await ownProfileResponse.json();
+    assert.equal(ownProfileResponse.status, 200);
+    assert.equal(Number(ownProfile.id), Number(accountOwner.insertId));
+    const profileUpdate = await fetch(profileUrl, {
+        method: 'PUT',
+        headers: requesterAHeaders,
+        body: JSON.stringify({
+            nombre_completo: 'Solicitante de integración actualizado',
+            correo_institucional: `integration-${suffix}@example.test`
+        })
+    });
+    assert.equal(profileUpdate.status, 200);
+    const profileAfterUpdate = await fetch(profileUrl, { headers: requesterAHeaders });
+    assert.equal((await profileAfterUpdate.json()).nombre_completo, 'Solicitante de integración actualizado');
+    const attemptedForeignProfileUpdate = await fetch(profileUrl, {
+        method: 'PUT',
+        headers: requesterAHeaders,
+        body: JSON.stringify({
+            id: unrelatedUser.insertId,
+            nombre_completo: 'Intento de modificar otra cuenta',
+            correo_institucional: `foreign-${suffix}@example.test`
+        })
+    });
+    assert.equal(attemptedForeignProfileUpdate.status, 400);
+    const otherProfileResponse = await fetch(profileUrl, { headers: requesterBHeaders });
+    const otherProfile = await otherProfileResponse.json();
+    assert.equal(Number(otherProfile.id), Number(unrelatedUser.insertId));
+    assert.notEqual(otherProfile.nombre_completo, 'Intento de modificar otra cuenta');
+
+    const [userAdministration, institutionalReport] = await Promise.all([
+        fetch(`${baseUrl}/api/auth/usuarios`, { headers: requesterAHeaders }),
+        fetch(`${baseUrl}/api/stats`, { headers: requesterAHeaders })
+    ]);
+    assert.deepEqual([userAdministration.status, institutionalReport.status], [403, 403]);
+    await db.promise().query(
+        'DELETE FROM tickets WHERE id IN (?)',
+        [[requesterATicketId, requesterBTicketId]]
+    );
+    createdTicketIds.splice(createdTicketIds.indexOf(requesterATicketId), 1);
+    createdTicketIds.splice(createdTicketIds.indexOf(requesterBTicketId), 1);
 
     const update = (state, id = ticketId) => fetch(`${baseUrl}/api/tickets/${id}`, {
         method: 'PUT',
@@ -241,6 +364,14 @@ test('ticket API creation idempotency, server validation, concurrent transitions
     assert.equal(stats.csatPromedio, null);
     assert.equal(stats.primeraRespuestaPromedioHoras, 1);
     assert.equal(stats.tiempoPromedioHoras, 2);
-    assert.equal(stats.cumplimientoSlaRespuestaPct, 100);
-    assert.equal(stats.cumplimientoSlaResolucionPct, 100);
+    assert.equal(
+        stats.cumplimientoSlaRespuestaPct,
+        expectedKpi(baselineKpis.responseMetCount, baselineKpis.responseDueCount),
+        `El cumplimiento de respuesta debe incluir la línea base (${baselineKpis.responseMetCount}/${baselineKpis.responseDueCount}) y el ticket de prueba (1/1).`
+    );
+    assert.equal(
+        stats.cumplimientoSlaResolucionPct,
+        expectedKpi(baselineKpis.resolutionMetCount, baselineKpis.resolutionDueCount),
+        `El cumplimiento de resolución debe incluir la línea base (${baselineKpis.resolutionMetCount}/${baselineKpis.resolutionDueCount}) y el ticket resuelto de prueba (1/1).`
+    );
 });

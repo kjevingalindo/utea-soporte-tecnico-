@@ -15,8 +15,8 @@ async function saveTicket(ticketPayload) {
         'tipo_solicitante', 'impacto', 'urgencia', 'sla_response_due_at', 'sla_resolution_due_at',
         'idempotency_key', 'idempotency_hash'
     ];
-    const values = fields.map(field => ticketPayload[field]);
-    const [result] = await executeQuery(
+    const values = fields.map(field => ticketPayload[field] ?? null);
+    const result = await executeQuery(
         `INSERT INTO tickets (${fields.join(', ')}) VALUES (${fields.map(() => '?').join(', ')})`,
         values
     );

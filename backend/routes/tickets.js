@@ -15,11 +15,27 @@ const {
     TICKET_ASSIGNMENT_ROLES
 } = require('../utils/accessControl');
 const { validateTicketCreation } = require('../utils/ticketValidation');
-const { isValidTicketState, canTransitionTicket } = require('../utils/ticketStates');
-const { fingerprint } = require('../utils/idempotency');
+const { TICKET_STATES, ALLOWED_TRANSITIONS, isValidTicketState, canTransitionTicket } = require('../utils/ticketStates');
 const requireIdempotencyKey = require('../middleware/idempotencyKey');
+const ticketService = require('../services/ticketService');
 
 const PRIORIDADES_VALIDAS = ['Baja', 'Media', 'Alta', 'Urgente', 'Critica'];
+
+function enteroTecnicoValido(value) {
+    return (typeof value === 'number' ||
+        (typeof value === 'string' && /^\d+$/.test(value))) &&
+        Number.isSafeInteger(Number(value)) && Number(value) > 0;
+}
+
+router.get('/meta/transitions', verificarToken, (req, res) => {
+    res.json({
+        states: TICKET_STATES,
+        transitions: Object.fromEntries(
+            Object.entries(ALLOWED_TRANSITIONS).map(([state, next]) => [state, [...next]])
+        )
+    });
+});
+
 function esFechaProgramadaValida(value) {
     if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
     const parsed = new Date(`${value}T00:00:00Z`);
@@ -48,162 +64,124 @@ function calcularPrioridad(impacto, urgencia, prioridadActual) {
 }
 
 // Crear ticket (admin y usuario) - se asigna automáticamente al jefe
-router.post('/', verificarToken, requireIdempotencyKey, (req, res) => {
+router.post('/', verificarToken, requireIdempotencyKey, async (req, res) => {
     const validation = validateTicketCreation(req.body);
     if (validation.error) return res.status(400).json({ error: validation.error });
+    const payload = validation.value;
     const {
-        titulo, descripcion, tecnico_id, oficina_id, categoria_id, categoria_usuario,
-        solicitante_nombre, codigo_universitario_dni, tipo_solicitante,
-        impacto, urgencia
-    } = validation.value;
-    const requestHash = fingerprint(validation.value);
-
+        titulo, tecnico_id, oficina_id, categoria_id, impacto, urgencia,
+        solicitante_nombre, codigo_universitario_dni, tipo_solicitante
+    } = payload;
     const prioridadFinal = calcularPrioridad(impacto, urgencia);
     if (!PRIORIDADES_VALIDAS.includes(prioridadFinal)) {
         return res.status(400).json({ error: 'La prioridad no es valida' });
     }
-    const {
-        carrera: carreraNormalizada,
-        bloque: bloqueNormalizado,
-        ambiente: ambienteNormalizado,
-        ubicacion: ubicacionNormalizada,
-        aula: aulaNormalizada,
-        asignatura_area: asignaturaAreaNormalizada
-    } = validation.value;
     const rolPuedeAsignarTecnico = TICKET_ASSIGNMENT_ROLES.has(String(req.user.rol || '').toLowerCase());
-    const tieneTecnicoSeleccionado = rolPuedeAsignarTecnico && tecnico_id !== undefined && tecnico_id !== null && tecnico_id !== '';
-    if (tieneTecnicoSeleccionado &&
-        (!(typeof tecnico_id === 'number' || (typeof tecnico_id === 'string' && /^\d+$/.test(tecnico_id))) ||
-            !Number.isSafeInteger(Number(tecnico_id)) || Number(tecnico_id) < 1)) {
+    const tieneTecnicoSeleccionado = tecnico_id !== undefined && tecnico_id !== null && tecnico_id !== '';
+    if (!rolPuedeAsignarTecnico && tieneTecnicoSeleccionado) {
+        return res.status(403).json({ error: 'No tienes permiso para asignar un técnico al crear el ticket' });
+    }
+    if (tieneTecnicoSeleccionado && !enteroTecnicoValido(tecnico_id)) {
         return res.status(400).json({ error: 'El técnico seleccionado no es válido' });
     }
 
-    const findExistingRequest = callback => db.query(
-        'SELECT id, idempotency_hash FROM tickets WHERE user_id = ? AND idempotency_key = ?',
-        [req.user.id, req.idempotencyKey],
-        callback
-    );
-    const respondWithExisting = (rows, status = 200) => {
-        if (!rows.length) return res.status(500).json({ error: 'No se pudo confirmar el resultado de la creación' });
-        if (rows[0].idempotency_hash !== requestHash) {
-            return res.status(409).json({ error: 'La clave de reintento ya se usó con datos distintos. Inicia una nueva solicitud.' });
+    try {
+        const existingTicketId = await ticketService.findIdempotentTicket(
+            req.user.id,
+            req.idempotencyKey,
+            payload
+        );
+        if (existingTicketId) {
+            return res.json({
+                mensaje: 'El ticket de esta solicitud ya estaba creado',
+                ticketId: existingTicketId,
+                replayed: true
+            });
         }
-        return res.status(status).json({
-            mensaje: 'El ticket de esta solicitud ya estaba creado',
-            ticketId: rows[0].id,
-            replayed: true
-        });
-    };
 
-    findExistingRequest((lookupError, existing) => {
-        if (lookupError) return res.status(500).json({ error: 'No se pudo verificar la clave de creación' });
-        if (existing.length) return respondWithExisting(existing);
+        const [categories] = await db.promise().query(
+            `SELECT c.id FROM categorias c
+             INNER JOIN oficinas o ON o.id = c.oficina_id
+             WHERE c.id = ? AND c.oficina_id = ? AND c.activo = TRUE AND o.activo = TRUE`,
+            [categoria_id, oficina_id]
+        );
+        if (!categories.length) {
+            return res.status(400).json({ error: 'La categoria no pertenece a la oficina o esta inactiva' });
+        }
 
-    const insertarTicket = () => {
-        const tecnicoSql = tieneTecnicoSeleccionado
+        const technicianSql = tieneTecnicoSeleccionado
             ? `SELECT t.id FROM tecnico_oficinas ot
                INNER JOIN tecnicos t ON t.id = ot.tecnico_id
-               WHERE ot.oficina_id = ? AND t.id = ?
-               LIMIT 1`
+               WHERE ot.oficina_id = ? AND t.id = ? LIMIT 1`
             : `SELECT t.id FROM tecnico_oficinas ot
                INNER JOIN tecnicos t ON t.id = ot.tecnico_id
-               WHERE ot.oficina_id = ?
-               ORDER BY ot.es_responsable DESC, t.id
-               LIMIT 1`;
-        const tecnicoParams = tieneTecnicoSeleccionado
+               WHERE ot.oficina_id = ? ORDER BY ot.es_responsable DESC, t.id LIMIT 1`;
+        const technicianParams = tieneTecnicoSeleccionado
             ? [oficina_id, Number(tecnico_id)]
             : [oficina_id];
-        db.query(tecnicoSql, tecnicoParams, (err, results) => {
-        if (err) return res.status(500).json(err);
-        if (tieneTecnicoSeleccionado && results.length === 0) {
+        const [technicians] = await db.promise().query(technicianSql, technicianParams);
+        if (tieneTecnicoSeleccionado && !technicians.length) {
             return res.status(400).json({ error: 'El técnico seleccionado no pertenece a la oficina' });
         }
-        
-        const jefeId = results.length > 0 ? results[0].id : null;
-        const estadoInicial = jefeId ? 'Asignado' : 'Creado';
+
+        const technicianId = technicians.length ? technicians[0].id : null;
+        const initialState = technicianId ? 'Asignado' : 'Creado';
         const slaDeadlines = calculateSlaDeadlines(Date.now(), prioridadFinal);
-        const sql = `INSERT INTO tickets
-            (titulo, descripcion, estado, prioridad, tecnico_id, user_id, oficina_id, categoria_id, categoria_usuario, carrera, bloque, ambiente, aula, asignatura_area,
-             ubicacion, solicitante_nombre, codigo_universitario_dni, tipo_solicitante, impacto, urgencia,
-             sla_response_due_at, sla_resolution_due_at, idempotency_key, idempotency_hash)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) `;
+        const creation = await ticketService.createTicket({
+            ...payload,
+            prioridad: prioridadFinal,
+            tecnico_id: technicianId,
+            user_id: req.user.id,
+            estado: initialState,
+            sla_response_due_at: slaDeadlines.responseDueAt,
+            sla_resolution_due_at: slaDeadlines.resolutionDueAt,
+            idempotency_key: req.idempotencyKey
+        }, payload, { skipLookup: true });
+        if (creation.replayed) {
+            return res.json({
+                mensaje: 'El ticket de esta solicitud ya estaba creado',
+                ticketId: creation.id,
+                replayed: true
+            });
+        }
 
-        db.query(sql, [
-            titulo, descripcion, estadoInicial, prioridadFinal, jefeId, req.user.id,
-            oficina_id,
-            categoria_id,
-            categoria_usuario,
-            carreraNormalizada,
-            bloqueNormalizado,
-            ambienteNormalizado,
-            aulaNormalizada,
-            asignaturaAreaNormalizada,
-            ubicacionNormalizada,
-            solicitante_nombre.trim(),
-            codigo_universitario_dni.trim(),
-            tipo_solicitante,
-            impacto,
-            urgencia,
-            slaDeadlines.responseDueAt,
-            slaDeadlines.resolutionDueAt,
-            req.idempotencyKey,
-            requestHash
-        ], (err, result) => {
-            if (err) {
-                if (err.code !== 'ER_DUP_ENTRY') return res.status(500).json({ error: 'No se pudo crear el ticket' });
-                return findExistingRequest((lookupError, existingRows) => {
-                    if (lookupError) return res.status(500).json({ error: 'No se pudo confirmar el ticket creado' });
-                    return respondWithExisting(existingRows);
-                });
+        registrarHistorial(
+            creation.id,
+            req.user.id,
+            'creado',
+            `Ticket creado por ${req.user.username}`,
+            'estado',
+            null,
+            initialState
+        );
+        db.query("SELECT id FROM usuarios WHERE rol IN ('admin', 'superadmin')", (error, admins) => {
+            if (error) {
+                console.error('No se pudo consultar administradores para notificar el nuevo ticket:', error.message);
+                return;
             }
-
-            // Notificar a todos los administradores sobre el nuevo ticket
-            const ticketId = result.insertId;
-            registrarHistorial(
-                ticketId,
-                req.user.id,
-                'creado',
-                `Ticket creado por ${req.user.username}`,
-                'estado',
-                null,
-                estadoInicial
-            );
-
-            db.query("SELECT id FROM usuarios WHERE rol = 'admin'", (err2, admins) => {
-                if (!err2 && admins) {
-                    admins.forEach(admin => {
-                        if (admin.id !== req.user.id) {
-                            crearNotificacion(
-                                admin.id, 
-                                'nuevo_ticket', 
-                                `${req.user.username} creó un nuevo ticket: "${titulo}" (${prioridadFinal})`, 
-                                ticketId
-                            ).catch(notificationError => {
-                                console.error('No se pudo notificar la creación del ticket:', notificationError.message);
-                            });
-                        }
+            admins.forEach(admin => {
+                if (admin.id !== req.user.id) {
+                    crearNotificacion(
+                        admin.id,
+                        'nuevo_ticket',
+                        `${req.user.username} creó un nuevo ticket: "${titulo}" (${prioridadFinal})`,
+                        creation.id
+                    ).catch(notificationError => {
+                        console.error('No se pudo notificar la creación del ticket:', notificationError.message);
                     });
                 }
             });
+        });
 
-            const mensaje = jefeId
-                ? 'Ticket creado y asignado a un técnico de la oficina'
-                : 'Ticket creado; no hay técnico asignable y queda pendiente de asignación';
-            res.status(201).json({ mensaje, ticketId });
-        });
-        });
-    };
-
-    db.query(`SELECT c.id
-              FROM categorias c
-              INNER JOIN oficinas o ON o.id = c.oficina_id
-              WHERE c.id = ? AND c.oficina_id = ? AND c.activo = TRUE AND o.activo = TRUE`,
-        [categoria_id, oficina_id], (err, rows) => {
-            if (err) return res.status(500).json({ error: 'No se pudo validar la oficina y categoría' });
-            if (!rows.length) return res.status(400).json({ error: 'La categoria no pertenece a la oficina o esta inactiva' });
-            insertarTicket();
-        });
-    });
+        const mensaje = technicianId
+            ? 'Ticket creado y asignado a un técnico de la oficina'
+            : 'Ticket creado; no hay técnico asignable y queda pendiente de asignación';
+        return res.status(201).json({ mensaje, ticketId: creation.id });
+    } catch (error) {
+        if (error.status === 409) return res.status(409).json({ error: error.message });
+        console.error('Error al crear ticket:', error.message);
+        return res.status(500).json({ error: 'No se pudo crear el ticket' });
+    }
 });
 
 // Obtener tickets (admin/superadmin ve todos, usuario ve solo los suyos, con soporte de paginación)
@@ -321,13 +299,92 @@ router.get('/:id/historial', verificarToken, requireTicketAccess({
     });
 });
 
+router.patch('/:id/assignment', verificarToken, verificarRol('admin', 'superadmin'), (req, res) => {
+    const ticketId = Number(req.params.id);
+    const { tecnico_id } = req.body || {};
+    if (!Number.isSafeInteger(ticketId) || ticketId < 1 ||
+        !((typeof tecnico_id === 'number' && Number.isSafeInteger(tecnico_id) && tecnico_id > 0) ||
+          (typeof tecnico_id === 'string' && /^\d+$/.test(tecnico_id) &&
+           Number.isSafeInteger(Number(tecnico_id)) && Number(tecnico_id) > 0))) {
+        return res.status(400).json({ error: 'El ticket y el técnico deben ser válidos' });
+    }
+    if (Object.keys(req.body || {}).some(field => field !== 'tecnico_id')) {
+        return res.status(400).json({ error: 'La solicitud contiene campos no permitidos' });
+    }
+
+    db.query('SELECT oficina_id, tecnico_id FROM tickets WHERE id = ?', [ticketId], (ticketError, tickets) => {
+        if (ticketError) return res.status(500).json({ error: 'No se pudo consultar el ticket' });
+        if (!tickets.length) return res.status(404).json({ error: 'Ticket no encontrado' });
+        db.query(`SELECT t.id FROM tecnico_oficinas ot
+                  INNER JOIN tecnicos t ON t.id = ot.tecnico_id
+                  WHERE ot.oficina_id = ? AND t.id = ? LIMIT 1`,
+            [tickets[0].oficina_id, Number(tecnico_id)],
+            (technicianError, technicians) => {
+                if (technicianError) return res.status(500).json({ error: 'No se pudo validar la oficina del técnico' });
+                if (!technicians.length) {
+                    return res.status(400).json({ error: 'El técnico seleccionado no pertenece a la oficina del ticket' });
+                }
+                db.query('UPDATE tickets SET tecnico_id = ? WHERE id = ?',
+                    [Number(tecnico_id), ticketId],
+                    (updateError, result) => {
+                        if (updateError) return res.status(500).json({ error: 'No se pudo asignar el técnico' });
+                        if (!result.affectedRows) return res.status(404).json({ error: 'Ticket no encontrado' });
+                        registrarHistorial(
+                            ticketId,
+                            req.user.id,
+                            'tecnico',
+                            'Técnico asignado actualizado',
+                            'tecnico_id',
+                            tickets[0].tecnico_id,
+                            Number(tecnico_id)
+                        );
+                        res.json({ mensaje: 'Técnico asignado correctamente' });
+                    });
+            });
+    });
+});
+
 // Editar ticket (solo admin)
-router.put('/:id', verificarToken, verificarRol('admin'), (req, res) => {
+router.put('/:id', verificarToken, verificarRol('admin', 'superadmin'), (req, res) => {
     const { id } = req.params;
+    if (!/^\d+$/.test(id) || !Number.isSafeInteger(Number(id)) || Number(id) < 1) {
+        return res.status(400).json({ error: 'El identificador del ticket no es válido' });
+    }
     const body = req.body || {};
     const { titulo, descripcion, estado, tecnico_id, prioridad, impacto, urgencia, fecha_programada, carrera } = body;
+    const allowedFields = new Set([
+        'titulo', 'descripcion', 'estado', 'tecnico_id', 'prioridad',
+        'impacto', 'urgencia', 'fecha_programada', 'carrera'
+    ]);
+    const unexpectedFields = Object.keys(body).filter(field => !allowedFields.has(field));
+    if (unexpectedFields.length) {
+        return res.status(400).json({ error: `Campo no permitido: ${unexpectedFields[0]}` });
+    }
+    if (titulo !== undefined &&
+        (typeof titulo !== 'string' || !titulo.trim() || titulo.trim().length > 255)) {
+        return res.status(400).json({ error: 'El asunto es obligatorio y debe tener como máximo 255 caracteres' });
+    }
+    if (descripcion !== undefined &&
+        (typeof descripcion !== 'string' || !descripcion.trim() || descripcion.trim().length > 10000)) {
+        return res.status(400).json({ error: 'La descripción es obligatoria y debe tener como máximo 10000 caracteres' });
+    }
     if (estado !== undefined && !isValidTicketState(estado)) {
         return res.status(400).json({ error: 'El estado del ticket no es válido' });
+    }
+    if (prioridad !== undefined && !PRIORIDADES_VALIDAS.includes(prioridad)) {
+        return res.status(400).json({ error: 'La prioridad seleccionada no es válida' });
+    }
+    if (impacto !== undefined && impacto !== null && !['Bajo', 'Medio', 'Alto', 'Critico'].includes(impacto)) {
+        return res.status(400).json({ error: 'El impacto seleccionado no es válido' });
+    }
+    if (urgencia !== undefined && urgencia !== null && !['Baja', 'Media', 'Alta', 'Critica'].includes(urgencia)) {
+        return res.status(400).json({ error: 'La urgencia seleccionada no es válida' });
+    }
+    if (tecnico_id !== undefined && tecnico_id !== null && tecnico_id !== '' &&
+        !((typeof tecnico_id === 'number' && Number.isSafeInteger(tecnico_id) && tecnico_id > 0) ||
+          (typeof tecnico_id === 'string' && /^\d+$/.test(tecnico_id) &&
+           Number.isSafeInteger(Number(tecnico_id)) && Number(tecnico_id) > 0))) {
+        return res.status(400).json({ error: 'El técnico seleccionado no es válido' });
     }
 
     if (fecha_programada !== undefined && fecha_programada !== null && fecha_programada !== '') {
@@ -342,19 +399,20 @@ router.put('/:id', verificarToken, verificarRol('admin'), (req, res) => {
     let sql = 'UPDATE tickets SET';
     let params = [];
     
-    if (titulo !== undefined && titulo !== '') {
+    if (titulo !== undefined) {
         sql += ' titulo = ?,';
-        params.push(titulo);
+        params.push(titulo.trim());
     }
     
-    if (descripcion !== undefined && descripcion !== '') {
+    if (descripcion !== undefined) {
         sql += ' descripcion = ?,';
-        params.push(descripcion);
+        params.push(descripcion.trim());
     }
 
     if (carrera !== undefined) {
         const carreraNormalizada = carrera === null || carrera === '' ? null : String(carrera).trim();
-        if (carreraNormalizada !== null && !UTEA_PREGRADO_CARRERAS.includes(carreraNormalizada)) {
+        if (carreraNormalizada !== null &&
+            (carreraNormalizada.length > 120 || !UTEA_PREGRADO_CARRERAS.includes(carreraNormalizada))) {
             return res.status(400).json({ error: 'La carrera seleccionada no es válida para la UTEA' });
         }
         sql += ' carrera = ?,';
@@ -374,7 +432,7 @@ router.put('/:id', verificarToken, verificarRol('admin'), (req, res) => {
         }
     }
 
-    if (prioridad !== undefined && PRIORIDADES_VALIDAS.includes(prioridad)) {
+    if (prioridad !== undefined) {
         const slaDeadlines = calculateSlaDeadlines(Date.now(), prioridad);
         sql += ' prioridad = ?, sla_response_due_at = IF(sla_first_response_at IS NULL, ?, sla_response_due_at), sla_resolution_due_at = IF(sla_resolved_at IS NULL, ?, sla_resolution_due_at),';
         params.push(prioridad, slaDeadlines.responseDueAt, slaDeadlines.resolutionDueAt);
@@ -392,7 +450,7 @@ router.put('/:id', verificarToken, verificarRol('admin'), (req, res) => {
     
     if (tecnico_id !== undefined) {
         sql += ' tecnico_id = ?,';
-        params.push(tecnico_id || null);
+        params.push(tecnico_id === '' ? null : tecnico_id);
     }
 
     if (fecha_programada !== undefined) {
@@ -497,8 +555,25 @@ router.put('/:id', verificarToken, verificarRol('admin'), (req, res) => {
         });
     };
 
+    const validarTecnicoYActualizar = expectedState => {
+        if (tecnico_id === undefined || tecnico_id === null || tecnico_id === '') {
+            return ejecutarActualizacion(expectedState);
+        }
+        db.query(`SELECT tk.id
+                  FROM tickets tk
+                  INNER JOIN tecnico_oficinas ot ON ot.oficina_id = tk.oficina_id
+                  WHERE tk.id = ? AND ot.tecnico_id = ?
+                  LIMIT 1`, [id, Number(tecnico_id)], (err, rows) => {
+            if (err) return res.status(500).json({ error: 'No se pudo validar la oficina del técnico' });
+            if (!rows.length) {
+                return res.status(400).json({ error: 'El técnico seleccionado no pertenece a la oficina del ticket' });
+            }
+            ejecutarActualizacion(expectedState);
+        });
+    };
+
     const validarEstadoYActualizar = () => {
-        if (estado === undefined) return ejecutarActualizacion(null);
+        if (estado === undefined) return validarTecnicoYActualizar(null);
         db.query('SELECT estado FROM tickets WHERE id = ?', [id], (err, rows) => {
             if (err) return res.status(500).json({ error: 'No se pudo consultar el estado actual del ticket' });
             if (!rows.length) return res.status(404).json({ error: 'Ticket no encontrado' });
@@ -506,7 +581,7 @@ router.put('/:id', verificarToken, verificarRol('admin'), (req, res) => {
             if (!canTransitionTicket(estadoActual, estado)) {
                 return res.status(409).json({ error: `No se permite cambiar el ticket de ${estadoActual} a ${estado}` });
             }
-            ejecutarActualizacion(estadoActual);
+            validarTecnicoYActualizar(estadoActual);
         });
     };
 

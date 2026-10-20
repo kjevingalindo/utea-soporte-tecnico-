@@ -1,33 +1,35 @@
 const fs = require('fs');
 const path = require('path');
 const mysql = require('mysql2/promise');
+const { resolveDatabaseConfig } = require('../backend/config/databaseConfig');
 
-if (!process.argv.includes('--no-dotenv')) {
+const testMode = process.env.UTEA_TEST_DB_ALLOW_INTEGRATION === '1';
+if (!testMode && !process.argv.includes('--no-dotenv')) {
     require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 }
 
 async function migrate() {
-    const required = ['DB_HOST', 'DB_USER', 'DB_NAME'];
-    const missing = required.filter(name => !process.env[name]);
-    if (missing.length) {
-        throw new Error(`Faltan variables de entorno: ${missing.join(', ')}`);
-    }
-
-    const port = Number(process.env.DB_PORT || 3306);
-    if (!Number.isInteger(port) || port < 1 || port > 65535) {
-        throw new Error('DB_PORT debe ser un puerto valido');
-    }
+    const config = resolveDatabaseConfig();
 
     const connection = await mysql.createConnection({
-        host: process.env.DB_HOST,
-        port,
-        user: process.env.DB_USER,
-        password: process.env.DB_PASSWORD || '',
-        database: process.env.DB_NAME,
+        host: config.host,
+        port: config.port,
+        user: config.user,
+        password: config.password,
+        database: config.database,
         multipleStatements: true
     });
 
     try {
+        if (config.isTest) {
+            const [[identity]] = await connection.query(
+                'SELECT DATABASE() AS databaseName, @@hostname AS hostName, @@port AS serverPort'
+            );
+            if (identity.databaseName !== config.database || Number(identity.serverPort) !== config.port) {
+                throw new Error('La identidad de la conexión no coincide con el esquema y puerto de pruebas configurados');
+            }
+            console.log(`Base de pruebas confirmada: ${config.host}:${config.port}/${config.database}`);
+        }
         const [beforeMigrationTables] = await connection.query('SHOW TABLES');
         const existingTableNames = beforeMigrationTables.map(row => Object.values(row)[0]);
         const migrationTableExists = existingTableNames.includes('schema_migrations');

@@ -1,4 +1,8 @@
-require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') });
+if (process.env.UTEA_TEST_DB_ALLOW_INTEGRATION !== '1') {
+    require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') });
+}
+const { resolveDatabaseConfig } = require('./config/databaseConfig');
+resolveDatabaseConfig();
 
 const express = require('express');
 const cors = require('cors');
