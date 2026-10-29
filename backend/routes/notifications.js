@@ -21,9 +21,12 @@ db.query(`CREATE TABLE IF NOT EXISTS notificaciones (
 
 // Obtener notificaciones del usuario autenticado
 router.get('/', verificarToken, (req, res) => {
-    const sql = `SELECT notificaciones.*, tickets.titulo as ticket_titulo 
+    const sql = `SELECT notificaciones.*, tickets.titulo as ticket_titulo,
+                        solicitudes_apoyo.nombre_actividad as apoyo_nombre,
+                        solicitudes_apoyo.codigo as apoyo_codigo
                  FROM notificaciones 
                  LEFT JOIN tickets ON notificaciones.ticket_id = tickets.id 
+                 LEFT JOIN solicitudes_apoyo ON notificaciones.apoyo_id = solicitudes_apoyo.id
                  WHERE notificaciones.user_id = ? 
                  ORDER BY fecha DESC 
                  LIMIT 20`;

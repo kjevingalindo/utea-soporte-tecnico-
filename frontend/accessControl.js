@@ -31,6 +31,15 @@
         },
         canManageAssignments(user) {
             return ['admin', 'superadmin'].includes(roleOf(user));
+        },
+        canManageApoyos(user) {
+            return ['admin', 'superadmin'].includes(roleOf(user));
+        },
+        isTechnician(user) {
+            return ['tecnico', 'admin', 'superadmin'].includes(roleOf(user));
+        },
+        isSolicitante(user) {
+            return ['usuario', 'estudiante', 'docente', 'administrativo'].includes(roleOf(user));
         }
     });
 })(window);

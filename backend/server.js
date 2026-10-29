@@ -57,6 +57,7 @@ const catalogosRoutes = require('./routes/catalogos');
 const adjuntosRoutes = require('./routes/adjuntos');
 const diagnosticosRoutes = require('./routes/diagnosticos');
 const cuentasRoutes = require('./routes/cuentas.routes');
+const apoyosRoutes = require('./routes/apoyos.routes');
 const errorHandler = require('./middleware/errorHandler');
 
 app.use('/api/tecnicos', tecnicosRoutes);
@@ -67,6 +68,7 @@ app.use('/api/catalogos', catalogosRoutes);
 app.use('/api/adjuntos', adjuntosRoutes);
 app.use('/api/diagnosticos', diagnosticosRoutes);
 app.use('/api/cuentas', cuentasRoutes);
+app.use('/api/apoyos', apoyosRoutes);
 app.use(errorHandler);
 
 const PORT = Number(process.env.PORT || 3000);

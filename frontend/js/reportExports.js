@@ -27,7 +27,8 @@
         open,
         metrics,
         formatDuration,
-        timestamp
+        timestamp,
+        apoyos
     }) {
         const rows = [
             ['Reporte mensual de soporte UTEA', monthLabel],
@@ -76,7 +77,8 @@
         open,
         metrics,
         formatDuration,
-        timestamp
+        timestamp,
+        apoyos
     }) {
         const ticketRows = tickets.map(ticket => `
             <tr>
@@ -127,6 +129,21 @@
                 <div class="kpi"><span>Registrados en el mes que siguen abiertos</span><strong>${open.length}</strong></div>
                 <div class="kpi"><span>Tiempo medio de resolución del mes</span><strong>${escapeHtml(formatDuration(metrics.resolutionHours))}</strong></div>
             </div>
+
+            ${apoyos ? `
+            <h2 style="margin-top:28px;">Servicios programados: Apoyos técnicos para eventos y ambientes</h2>
+            <div class="kpis">
+                <div class="kpi"><span>Solicitados</span><strong>${apoyos.solicitados || 0}</strong></div>
+                <div class="kpi"><span>Programados</span><strong>${apoyos.programados || 0}</strong></div>
+                <div class="kpi"><span>Finalizados</span><strong>${apoyos.finalizados || 0}</strong></div>
+                <div class="kpi"><span>Atención pend. reg.</span><strong style="color:#dc2626;">${apoyos.atencionPendienteRegistrar || 0}</strong></div>
+                <div class="kpi"><span>Tiempo medio cobertura</span><strong>${apoyos.tiempoPromedioCoberturaHoras || 0} h</strong></div>
+            </div>
+            <p style="font-size:12px; color:#475569;">
+                <strong>Tipo más solicitado:</strong> ${escapeHtml(apoyos.tiposMasSolicitados?.[0]?.tipo || '—')} · 
+                <strong>Ambiente con mayor demanda:</strong> ${escapeHtml(apoyos.ambientesMayorDemanda?.[0] ? apoyos.ambientesMayorDemanda[0].ambiente + ' (' + apoyos.ambientesMayorDemanda[0].bloque + ')' : '—')}
+            </p>
+            ` : ''}
             <h2>Detalle de incidencias</h2>
             <table><thead><tr><th>ID</th><th>Solicitante</th><th>Oficina</th><th>Categoría</th><th>Asunto</th><th>Técnico</th><th>Prioridad</th><th>Estado</th><th>Registro</th></tr></thead>
             <tbody>${ticketRows || '<tr><td colspan="9">No hay incidencias registradas en este periodo.</td></tr>'}</tbody></table>

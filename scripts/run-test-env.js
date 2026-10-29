@@ -114,7 +114,7 @@ async function main() {
     } else if (mode === 'integration') {
         await run(node, ['scripts/migrate.js', '--no-dotenv'], env);
         await run(node, ['scripts/migrate.js', '--no-dotenv'], env);
-        await run(node, ['--test', 'tests/integration/accounts.integration.test.js', 'tests/integration/ticket-routes.integration.test.js'], env);
+        await run(node, ['--test', '--test-concurrency=1', 'tests/integration/accounts.integration.test.js', 'tests/integration/ticket-routes.integration.test.js', 'tests/integration/apoyos.integration.test.js'], env);
     } else {
         await run(node, ['backend/server.js'], env);
     }

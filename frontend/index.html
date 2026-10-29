@@ -34,6 +34,14 @@
                     <i class="ph ph-kanban"></i>
                     <span id="ticketsNavLabel">Tickets</span>
                 </a>
+                <a href="#" class="nav-item" data-view="apoyos" id="adminApoyosNav" hidden>
+                    <i class="ph ph-calendar-check"></i>
+                    <span>Apoyos programados</span>
+                </a>
+                <a href="#" class="nav-item" data-view="tecnico-apoyos" id="tecnicoApoyosNav" hidden>
+                    <i class="ph ph-check-square-offset"></i>
+                    <span>Mis tareas de apoyo</span>
+                </a>
                 <a href="#" class="nav-item" data-view="perfil" id="profileNav" hidden>
                     <i class="ph ph-user-circle"></i>
                     <span>Mi perfil</span>
@@ -373,8 +381,17 @@
                         <button type="button" class="btn-create-ticket" id="ticketsNewRequestButton">
                             <i class="ph ph-plus" aria-hidden="true"></i> Nuevo ticket
                         </button>
+                        <button type="button" class="btn-primary" id="btnSolicitarApoyoEvento" onclick="window.ApoyosModule.abrirModalSolicitudApoyo()" style="background:#2563eb; color:white; display:inline-flex; align-items:center; gap:6px; padding:10px 16px; border-radius:8px; font-weight:600; cursor:pointer; border:none;">
+                            <i class="ph ph-calendar-plus" aria-hidden="true"></i> Solicitar apoyo para un evento
+                        </button>
                     </div>
 
+
+                    <div class="subtabs-tickets" style="display:flex; gap:12px; margin-bottom:16px; border-bottom:2px solid var(--border-color); padding-bottom:8px;">
+                        <button type="button" class="subtab-btn" id="tabMisTickets" style="font-weight:600; background:none; border:none; padding:8px 12px; cursor:pointer; color:var(--text-primary); border-bottom:3px solid var(--primary-color);">Tickets de soporte</button>
+                        <button type="button" class="subtab-btn" id="tabMisApoyos" style="font-weight:600; background:none; border:none; padding:8px 12px; cursor:pointer; color:var(--text-secondary);">Solicitudes de apoyo para eventos <span class="badge" id="count-mis-apoyos" style="background:#e0e7ff; color:#3730a3; padding:2px 8px; border-radius:12px; font-size:0.75rem; margin-left:4px;">0</span></button>
+                    </div>
+                    <div id="misTicketsContainer">
                     <section class="widget-card account-incidents-card" aria-labelledby="accountIncidentsTitle">
                         <div class="widget-header">
                             <div>
@@ -416,6 +433,127 @@
                             </div>
                         </div>
                     </section>
+                    </div><!-- end misTicketsContainer -->
+                    <div id="misApoyosContainer" style="display:none; margin-top:16px;">
+                        <div class="widget-header" style="margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
+                            <h3 style="margin:0;">Mis solicitudes de apoyo para eventos</h3>
+                            <button type="button" class="btn-small" onclick="window.ApoyosModule.cargarMisSolicitudesApoyo()"><i class="ph ph-arrows-clockwise"></i> Actualizar</button>
+                        </div>
+                        <div id="misApoyosLista"></div>
+                    </div>
+                </section>
+
+
+                <!-- VIEW: APOYOS PROGRAMADOS (ADMIN) -->
+                <section id="view-apoyos" class="view-section" hidden>
+                    <div class="page-heading" style="margin-bottom:20px; display:flex; justify-content:space-between; align-items:center;">
+                        <div>
+                            <h2>Apoyos técnicos programados</h2>
+                            <p class="text-muted">Gestión, programación y asignación de eventos y ambientes institucionales.</p>
+                        </div>
+                        <div style="display:flex; gap:10px;">
+                            <button type="button" class="btn-secondary" onclick="window.ApoyosModule.cargarApoyosAdmin()">
+                                <i class="ph ph-arrows-clockwise"></i> Actualizar
+                            </button>
+                            <button type="button" class="btn-primary" onclick="window.ApoyosModule.abrirModalSolicitudApoyo()">
+                                <i class="ph ph-plus"></i> Nueva solicitud de apoyo
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Métricas resumen -->
+                    <div class="dashboard-kpi-grid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:14px; margin-bottom:20px;">
+                        <div class="kpi-card" style="padding:16px; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-main);">
+                            <span style="font-size:0.85rem; color:var(--text-secondary);">Total solicitados</span>
+                            <strong id="statApoyoSol" style="display:block; font-size:1.8rem; color:var(--primary-color); margin-top:4px;">0</strong>
+                        </div>
+                        <div class="kpi-card" style="padding:16px; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-main);">
+                            <span style="font-size:0.85rem; color:var(--text-secondary);">Programados activos</span>
+                            <strong id="statApoyoProg" style="display:block; font-size:1.8rem; color:#7c3aed; margin-top:4px;">0</strong>
+                        </div>
+                        <div class="kpi-card" style="padding:16px; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-main);">
+                            <span style="font-size:0.85rem; color:var(--text-secondary);">Finalizados</span>
+                            <strong id="statApoyoFin" style="display:block; font-size:1.8rem; color:#16a34a; margin-top:4px;">0</strong>
+                        </div>
+                        <div class="kpi-card" style="padding:16px; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-main);">
+                            <span style="font-size:0.85rem; color:#dc2626; font-weight:600;"><i class="ph ph-clock-countdown"></i> Atención pendiente reg.</span>
+                            <strong id="statApoyoPendReg" style="display:block; font-size:1.8rem; color:#dc2626; margin-top:4px;">0</strong>
+                        </div>
+                    </div>
+
+                    <!-- Filtros de administración -->
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; gap:12px; flex-wrap:wrap;">
+                        <div style="display:flex; gap:10px; align-items:center;">
+                            <label for="adminApoyosFiltroEstado" style="font-size:0.9rem; font-weight:600;">Estado:</label>
+                            <select id="adminApoyosFiltroEstado" class="modal-input" style="min-width:180px; margin:0;">
+                                <option value="">Todos los estados</option>
+                                <option value="Recibida">Recibida</option>
+                                <option value="En revision">En revisión</option>
+                                <option value="Observada">Observada</option>
+                                <option value="Aprobada">Aprobada</option>
+                                <option value="Programada">Programada</option>
+                                <option value="En atencion">En atención</option>
+                                <option value="Finalizada">Finalizada</option>
+                                <option value="Rechazada">Rechazada</option>
+                                <option value="Cancelada">Cancelada</option>
+                                <option value="Impedida">Impedida</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="table-container" style="overflow-x:auto;">
+                        <table style="width:100%; border-collapse:collapse;" class="data-table">
+                            <thead>
+                                <tr style="border-bottom:2px solid var(--border-color); text-align:left;">
+                                    <th style="padding:10px;">Código</th>
+                                    <th style="padding:10px;">Actividad / Área</th>
+                                    <th style="padding:10px;">Ambiente</th>
+                                    <th style="padding:10px;">Fecha y Horario</th>
+                                    <th style="padding:10px;">Técnico</th>
+                                    <th style="padding:10px;">Estado</th>
+                                    <th style="padding:10px;">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="adminApoyosTableBody">
+                                <tr><td colspan="7" style="text-align:center; padding:24px;">Cargando...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- VIEW: MIS TAREAS DE APOYO (TÉCNICO) -->
+                <section id="view-tecnico-apoyos" class="view-section" hidden>
+                    <div class="page-heading" style="margin-bottom:20px; display:flex; justify-content:space-between; align-items:center;">
+                        <div>
+                            <h2>Mis tareas de apoyo a eventos</h2>
+                            <p class="text-muted">Servicios técnicos asignados, registro de llegada, atención y finalización.</p>
+                        </div>
+                        <button type="button" class="btn-secondary" onclick="window.ApoyosModule.cargarTareasTecnico()">
+                            <i class="ph ph-arrows-clockwise"></i> Actualizar tareas
+                        </button>
+                    </div>
+
+                    <!-- 4 Subtabs de tareas de técnico -->
+                    <div class="tech-subtabs" style="display:flex; gap:8px; border-bottom:2px solid var(--border-color); padding-bottom:8px; margin-bottom:20px; flex-wrap:wrap;">
+                        <button type="button" class="tech-subtab-btn active btn-secondary" data-tab="hoy" style="display:flex; align-items:center; gap:6px;">
+                            <i class="ph ph-sun"></i> Hoy <span class="badge" id="count-tech-hoy" style="background:#dbeafe; color:#1e40af; padding:2px 8px; border-radius:10px; font-size:0.75rem;">0</span>
+                        </button>
+                        <button type="button" class="tech-subtab-btn btn-secondary" data-tab="proximas" style="display:flex; align-items:center; gap:6px;">
+                            <i class="ph ph-calendar"></i> Próximas <span class="badge" id="count-tech-prox" style="background:#ede9fe; color:#6d28d9; padding:2px 8px; border-radius:10px; font-size:0.75rem;">0</span>
+                        </button>
+                        <button type="button" class="tech-subtab-btn btn-secondary" data-tab="atencion_pendiente" style="display:flex; align-items:center; gap:6px;">
+                            <i class="ph ph-clock-countdown"></i> Atención pendiente de registrar <span class="badge" id="count-tech-pend" style="background:#fee2e2; color:#b91c1c; padding:2px 8px; border-radius:10px; font-size:0.75rem;">0</span>
+                        </button>
+                        <button type="button" class="tech-subtab-btn btn-secondary" data-tab="finalizadas" style="display:flex; align-items:center; gap:6px;">
+                            <i class="ph ph-check-circle"></i> Finalizadas <span class="badge" id="count-tech-fin" style="background:#dcfce7; color:#15803d; padding:2px 8px; border-radius:10px; font-size:0.75rem;">0</span>
+                        </button>
+                    </div>
+
+                    <div id="techTareasAprobadasAlert" style="display:none; margin-bottom:16px; padding:12px 16px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; color:#1e40af; font-size:0.9rem;"></div>
+
+                    <div id="techTareasContainer">
+                        <p class="text-muted" style="padding:20px;">Cargando tareas...</p>
+                    </div>
                 </section>
 
                 <!-- VIEW: PERFIL -->
@@ -1323,6 +1461,264 @@
     <script src="js/ticketForm.js"></script>
     <script src="js/ticketTable.js"></script>
     <script src="js/reportExports.js"></script>
+    
+    <!-- MODAL: SOLICITUD DE APOYO TÉCNICO -->
+    <div id="modalSolicitudApoyoOverlay" class="modal-overlay" style="display:none;" onclick="window.ApoyosModule.cerrarModalSolicitudApoyo()"></div>
+    <section id="modalSolicitudApoyo" class="modal-card" style="display:none; max-width:640px; max-height:90vh; overflow-y:auto; padding:24px; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); z-index:1001; background:var(--bg-surface); border-radius:12px; box-shadow:0 20px 25px -5px rgba(0,0,0,0.2);" role="dialog" aria-modal="true">
+        <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:12px; margin-bottom:16px;">
+            <h3 style="margin:0;"><i class="ph ph-calendar-plus"></i> Solicitud de apoyo técnico para eventos</h3>
+            <button type="button" class="close-btn" onclick="window.ApoyosModule.cerrarModalSolicitudApoyo()"><i class="ph ph-x"></i></button>
+        </div>
+        <form id="formSolicitudApoyo" enctype="multipart/form-data">
+            <div id="solicitudConflictoAlert" style="display:none; padding:10px 14px; background:#fef2f2; border:1px solid #fecaca; border-radius:6px; color:#b91c1c; font-size:0.85rem; margin-bottom:14px;"></div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px;">
+                <div>
+                    <label for="apoyoContacto" style="font-weight:600; font-size:0.85rem;">Contacto del solicitante *</label>
+                    <input type="text" id="apoyoContacto" name="solicitante_contacto" required class="modal-input" placeholder="Nombre y celular / anexo">
+                </div>
+                <div>
+                    <label for="apoyoArea" style="font-weight:600; font-size:0.85rem;">Área u oficina organizadora *</label>
+                    <input type="text" id="apoyoArea" name="area_organizadora" required class="modal-input" placeholder="Ej. Facultad de Ingeniería">
+                </div>
+            </div>
+
+            <div style="margin-bottom:12px;">
+                <label for="apoyoResponsable" style="font-weight:600; font-size:0.85rem;">Responsable del evento *</label>
+                <input type="text" id="apoyoResponsable" name="responsable_evento" required class="modal-input" placeholder="Nombre completo y cargo">
+            </div>
+
+            <div style="margin-bottom:12px;">
+                <label for="apoyoNombreActividad" style="font-weight:600; font-size:0.85rem;">Nombre de la actividad o evento *</label>
+                <input type="text" id="apoyoNombreActividad" name="nombre_actividad" required class="modal-input" placeholder="Ej. Seminario de Inteligencia Artificial">
+            </div>
+
+            <div style="margin-bottom:12px;">
+                <label for="apoyoDescripcion" style="font-weight:600; font-size:0.85rem;">Descripción de la actividad *</label>
+                <textarea id="apoyoDescripcion" name="descripcion" required class="modal-textarea" rows="3" placeholder="Detalle los objetivos y naturaleza del evento..."></textarea>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px;">
+                <div>
+                    <label for="apoyoBloque" style="font-weight:600; font-size:0.85rem;">Bloque institucional *</label>
+                    <select id="apoyoBloque" name="bloque" required class="modal-input">
+                        <option value="">-- Seleccionar bloque --</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="apoyoAmbiente" style="font-weight:600; font-size:0.85rem;">Ambiente solicitado *</label>
+                    <select id="apoyoAmbiente" name="ambiente" required class="modal-input" disabled>
+                        <option value="">-- Primero elija el bloque --</option>
+                    </select>
+                </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:8px; margin-bottom:12px;">
+                <div>
+                    <label for="apoyoFechaEvento" style="font-weight:600; font-size:0.82rem;">Fecha evento *</label>
+                    <input type="date" id="apoyoFechaEvento" name="fecha_evento" required class="modal-input">
+                </div>
+                <div>
+                    <label for="apoyoHoraPrep" style="font-weight:600; font-size:0.82rem;" title="Llegada y pruebas técnicas">Hora prepar. *</label>
+                    <input type="time" id="apoyoHoraPrep" name="hora_preparacion" required class="modal-input">
+                </div>
+                <div>
+                    <label for="apoyoHoraInicio" style="font-weight:600; font-size:0.82rem;">Hora inicio *</label>
+                    <input type="time" id="apoyoHoraInicio" name="hora_inicio" required class="modal-input">
+                </div>
+                <div>
+                    <label for="apoyoHoraFin" style="font-weight:600; font-size:0.82rem;">Hora fin *</label>
+                    <input type="time" id="apoyoHoraFin" name="hora_fin" required class="modal-input">
+                </div>
+            </div>
+
+            <div style="margin-bottom:14px; background:var(--bg-main); padding:12px; border-radius:8px; border:1px solid var(--border-color);">
+                <label style="font-weight:700; font-size:0.88rem; display:block; margin-bottom:8px;">Tipos de apoyo técnico requeridos *</label>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:0.83rem;">
+                    <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" name="apoyos_requeridos" value="proyector"> Proyector y ecran</label>
+                    <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" name="apoyos_requeridos" value="laptop"> Laptop / equipo</label>
+                    <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" name="apoyos_requeridos" value="sonido"> Equipo de sonido</label>
+                    <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" name="apoyos_requeridos" value="microfonos"> Micrófonos</label>
+                    <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" name="apoyos_requeridos" value="internet"> Internet / WiFi dedicado</label>
+                    <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" name="apoyos_requeridos" value="iluminacion"> Iluminación</label>
+                    <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" name="apoyos_requeridos" value="grabacion"> Grabación / Streaming</label>
+                    <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" name="apoyos_requeridos" value="asistencia_permanente"> Asistencia técnica continua</label>
+                </div>
+            </div>
+
+            <div style="margin-bottom:12px;">
+                <label for="apoyoEquiposRecursos" style="font-weight:600; font-size:0.85rem;">Equipos o recursos adicionales (opcional)</label>
+                <input type="text" id="apoyoEquiposRecursos" name="equipos_recursos" class="modal-input" placeholder="Cables HDMI adicionales, puntero láser, etc.">
+            </div>
+
+            <div style="margin-bottom:14px;">
+                <label for="apoyoArchivo" style="font-weight:600; font-size:0.85rem;">Documento de autorización oficial (PDF, JPG, PNG) *</label>
+                <input type="file" id="apoyoArchivo" name="archivo" required accept=".pdf,.jpg,.jpeg,.png,.webp" class="modal-input" style="padding:6px;">
+                <small style="color:var(--text-secondary); display:block; margin-top:2px;">Oficio o solicitud firmada autorizando el uso del ambiente y requerimientos.</small>
+            </div>
+
+            <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:10px; margin-top:16px;">
+                <button type="button" class="btn-secondary" onclick="window.ApoyosModule.cerrarModalSolicitudApoyo()">Cancelar</button>
+                <button type="submit" class="btn-primary" style="background:#2563eb;">Enviar solicitud</button>
+            </div>
+        </form>
+    </section>
+
+    <!-- MODAL: PROGRAMAR / ASIGNAR APOYO (ADMIN) -->
+    <div id="modalProgramarApoyoOverlay" class="modal-overlay" style="display:none;" onclick="window.ApoyosModule.cerrarModalProgramar()"></div>
+    <section id="modalProgramarApoyo" class="modal-card" style="display:none; max-width:520px; padding:24px; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); z-index:1001; background:var(--bg-surface); border-radius:12px; box-shadow:0 20px 25px -5px rgba(0,0,0,0.2);" role="dialog">
+        <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:12px; margin-bottom:16px;">
+            <h3 style="margin:0;"><i class="ph ph-calendar-check"></i> Programar apoyo técnico</h3>
+            <button type="button" class="close-btn" onclick="window.ApoyosModule.cerrarModalProgramar()"><i class="ph ph-x"></i></button>
+        </div>
+        <form id="formProgramarApoyo">
+            <input type="hidden" id="adminProgramarApoyoId">
+            <input type="hidden" id="adminProgramarBloque">
+            <input type="hidden" id="adminProgramarAmbiente">
+
+            <div style="margin-bottom:12px; background:var(--bg-main); padding:10px; border-radius:6px; font-size:0.88rem;">
+                <strong id="adminProgramarActividadLabel"></strong><br>
+                <span id="adminProgramarAmbienteLabel" style="color:var(--text-secondary);"></span>
+            </div>
+
+            <div id="adminProgramarConflictoAlert" style="display:none; padding:10px; background:#fef2f2; border:1px solid #fecaca; border-radius:6px; color:#b91c1c; font-size:0.85rem; margin-bottom:14px;"></div>
+
+            <div style="margin-bottom:12px;">
+                <label for="adminProgramarFecha" style="font-weight:600; font-size:0.85rem;">Fecha del evento *</label>
+                <input type="date" id="adminProgramarFecha" required class="modal-input">
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:14px;">
+                <div>
+                    <label for="adminProgramarPrep" style="font-weight:600; font-size:0.82rem;">Hora prep. *</label>
+                    <input type="time" id="adminProgramarPrep" required class="modal-input">
+                </div>
+                <div>
+                    <label for="adminProgramarInicio" style="font-weight:600; font-size:0.82rem;">Hora inicio *</label>
+                    <input type="time" id="adminProgramarInicio" required class="modal-input">
+                </div>
+                <div>
+                    <label for="adminProgramarFin" style="font-weight:600; font-size:0.82rem;">Hora fin *</label>
+                    <input type="time" id="adminProgramarFin" required class="modal-input">
+                </div>
+            </div>
+
+            <div style="margin-bottom:16px;">
+                <label for="adminProgramarTecnico" style="font-weight:600; font-size:0.85rem;">Técnico responsable *</label>
+                <select id="adminProgramarTecnico" required class="modal-input">
+                    <option value="">-- Seleccionar técnico --</option>
+                </select>
+            </div>
+
+            <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:10px;">
+                <button type="button" class="btn-secondary" onclick="window.ApoyosModule.cerrarModalProgramar()">Cancelar</button>
+                <button type="submit" class="btn-primary" style="background:#7c3aed;">Guardar programación</button>
+            </div>
+        </form>
+    </section>
+
+    <!-- MODAL: OBSERVAR APOYO (ADMIN) -->
+    <div id="modalObservarApoyoOverlay" class="modal-overlay" style="display:none;" onclick="window.ApoyosModule.cerrarModalObservarAdmin()"></div>
+    <section id="modalObservarApoyo" class="modal-card" style="display:none; max-width:480px; padding:24px; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); z-index:1001; background:var(--bg-surface); border-radius:12px;" role="dialog">
+        <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+            <h3 style="margin:0;"><i class="ph ph-warning-circle"></i> Observar solicitud de apoyo</h3>
+            <button type="button" class="close-btn" onclick="window.ApoyosModule.cerrarModalObservarAdmin()"><i class="ph ph-x"></i></button>
+        </div>
+        <form id="formObservarApoyo">
+            <input type="hidden" id="observarApoyoId">
+            <div style="margin-bottom:14px;">
+                <label for="observarMotivo" style="font-weight:600; font-size:0.85rem;">Detalle de la observación / subsanación requerida *</label>
+                <textarea id="observarMotivo" required class="modal-textarea" rows="4" placeholder="Indique qué documentación o ajuste requiere subsanar el usuario..."></textarea>
+            </div>
+            <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:10px;">
+                <button type="button" class="btn-secondary" onclick="window.ApoyosModule.cerrarModalObservarAdmin()">Cancelar</button>
+                <button type="submit" class="btn-primary" style="background:#d97706;">Enviar observación</button>
+            </div>
+        </form>
+    </section>
+
+    <!-- MODAL: SUBSANAR APOYO (SOLICITANTE) -->
+    <div id="modalSubsanarApoyoOverlay" class="modal-overlay" style="display:none;" onclick="window.ApoyosModule.cerrarModalSubsanar()"></div>
+    <section id="modalSubsanarApoyo" class="modal-card" style="display:none; max-width:500px; padding:24px; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); z-index:1001; background:var(--bg-surface); border-radius:12px;" role="dialog">
+        <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+            <h3 style="margin:0;"><i class="ph ph-pencil-simple"></i> Subsanar observación</h3>
+            <button type="button" class="close-btn" onclick="window.ApoyosModule.cerrarModalSubsanar()"><i class="ph ph-x"></i></button>
+        </div>
+        <form id="formSubsanarApoyo" enctype="multipart/form-data">
+            <input type="hidden" id="subsanarApoyoId">
+            <div style="margin-bottom:14px;">
+                <label for="subsanarDetalle" style="font-weight:600; font-size:0.85rem;">Detalle de subsanación o corrección *</label>
+                <textarea id="subsanarDetalle" name="subsanacion" required class="modal-textarea" rows="4" placeholder="Explique las correcciones realizadas según lo solicitado..."></textarea>
+            </div>
+            <div style="margin-bottom:14px;">
+                <label for="subsanarArchivo" style="font-weight:600; font-size:0.85rem;">Nuevo archivo de autorización (si corresponde)</label>
+                <input type="file" id="subsanarArchivo" name="archivo" accept=".pdf,.jpg,.jpeg,.png,.webp" class="modal-input" style="padding:6px;">
+            </div>
+            <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:10px;">
+                <button type="button" class="btn-secondary" onclick="window.ApoyosModule.cerrarModalSubsanar()">Cancelar</button>
+                <button type="submit" class="btn-primary" style="background:#d97706;">Enviar subsanación</button>
+            </div>
+        </form>
+    </section>
+
+    <!-- MODAL: FINALIZAR APOYO (TÉCNICO) -->
+    <div id="modalFinalizarApoyoOverlay" class="modal-overlay" style="display:none;" onclick="window.ApoyosModule.cerrarModalFinalizar()"></div>
+    <section id="modalFinalizarApoyo" class="modal-card" style="display:none; max-width:520px; padding:24px; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); z-index:1001; background:var(--bg-surface); border-radius:12px;" role="dialog">
+        <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+            <h3 style="margin:0;"><i class="ph ph-check-circle"></i> Finalizar servicio de apoyo técnico</h3>
+            <button type="button" class="close-btn" onclick="window.ApoyosModule.cerrarModalFinalizar()"><i class="ph ph-x"></i></button>
+        </div>
+        <form id="formFinalizarApoyo" enctype="multipart/form-data">
+            <input type="hidden" id="finalizarApoyoId">
+            <div style="margin-bottom:14px;">
+                <label for="finalizarTrabajo" style="font-weight:600; font-size:0.85rem;">Trabajo técnico realizado *</label>
+                <textarea id="finalizarTrabajo" name="trabajo_realizado" required class="modal-textarea" rows="3" placeholder="Detalle la instalación de equipos, pruebas de sonido, asistencia brindada..."></textarea>
+            </div>
+            <div style="margin-bottom:14px;">
+                <label for="finalizarObservaciones" style="font-weight:600; font-size:0.85rem;">Observaciones de cierre</label>
+                <textarea id="finalizarObservaciones" name="observaciones_cierre" class="modal-textarea" rows="2" placeholder="Incidencias menores, hora real de entrega del ambiente..."></textarea>
+            </div>
+            <div style="margin-bottom:14px;">
+                <label for="finalizarEvidencia" style="font-weight:600; font-size:0.85rem;">Foto o acta de entrega de evidencia (opcional)</label>
+                <input type="file" id="finalizarEvidencia" name="archivo_evidencia" accept=".pdf,.jpg,.jpeg,.png,.webp" class="modal-input" style="padding:6px;">
+            </div>
+            <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:10px;">
+                <button type="button" class="btn-secondary" onclick="window.ApoyosModule.cerrarModalFinalizar()">Cancelar</button>
+                <button type="submit" class="btn-primary" style="background:#16a34a;">Confirmar finalización</button>
+            </div>
+        </form>
+    </section>
+
+    <!-- MODAL: INFORMAR IMPEDIMENTO (TÉCNICO) -->
+    <div id="modalImpedimentoApoyoOverlay" class="modal-overlay" style="display:none;" onclick="window.ApoyosModule.cerrarModalImpedimento()"></div>
+    <section id="modalImpedimentoApoyo" class="modal-card" style="display:none; max-width:480px; padding:24px; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); z-index:1001; background:var(--bg-surface); border-radius:12px;" role="dialog">
+        <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+            <h3 style="margin:0;"><i class="ph ph-prohibit"></i> Informar impedimento de atención</h3>
+            <button type="button" class="close-btn" onclick="window.ApoyosModule.cerrarModalImpedimento()"><i class="ph ph-x"></i></button>
+        </div>
+        <form id="formImpedimentoApoyo">
+            <input type="hidden" id="impedimentoApoyoId">
+            <div style="margin-bottom:14px;">
+                <label for="impedimentoMotivo" style="font-weight:600; font-size:0.85rem;">Motivo del impedimento *</label>
+                <textarea id="impedimentoMotivo" required class="modal-textarea" rows="4" placeholder="Explique por qué no fue posible atender el evento (ambiente cerrado, corte de fluido eléctrico, suspensión, etc.)..."></textarea>
+            </div>
+            <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:10px;">
+                <button type="button" class="btn-secondary" onclick="window.ApoyosModule.cerrarModalImpedimento()">Cancelar</button>
+                <button type="submit" class="btn-primary" style="background:#dc2626;">Registrar impedimento</button>
+            </div>
+        </form>
+    </section>
+
+    <!-- MODAL: DETALLE COMPLETO DE APOYO -->
+    <div id="modalDetalleApoyoOverlay" class="modal-overlay" style="display:none;" onclick="window.ApoyosModule.cerrarDetalleApoyo()"></div>
+    <section id="modalDetalleApoyo" class="modal-card" style="display:none; max-width:680px; max-height:88vh; overflow-y:auto; padding:24px; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); z-index:1001; background:var(--bg-surface); border-radius:12px; box-shadow:0 20px 25px -5px rgba(0,0,0,0.2);" role="dialog">
+        <div class="modal-header" style="display:flex; justify-content:flex-end; margin-bottom:12px;">
+            <button type="button" class="close-btn" onclick="window.ApoyosModule.cerrarDetalleApoyo()"><i class="ph ph-x"></i></button>
+        </div>
+        <div id="modalDetalleApoyoContent"></div>
+    </section>
+
+    <script src="js/modules/apoyosModule.js"></script>
     <script src="app.js"></script>
     <script src="authCheck.js"></script>
     <script type="module" src="js/main.js"></script>

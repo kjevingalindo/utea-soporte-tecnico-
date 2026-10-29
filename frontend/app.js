@@ -109,6 +109,16 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
     const adminNav = document.querySelector('.nav-item[data-view="admin"]');
     const adminView = document.getElementById('view-admin');
     if (adminNav) adminNav.hidden = !canViewAdmin;
+    const adminApoyosNav = document.getElementById('adminApoyosNav');
+    const adminApoyosView = document.getElementById('view-apoyos');
+    if (adminApoyosNav) adminApoyosNav.hidden = !canViewAdmin;
+    if (adminApoyosView) adminApoyosView.hidden = !canViewAdmin;
+
+    const isTechStaff = rol === 'tecnico' || canViewAdmin;
+    const techApoyosNav = document.getElementById('tecnicoApoyosNav');
+    const techApoyosView = document.getElementById('view-tecnico-apoyos');
+    if (techApoyosNav) techApoyosNav.hidden = !isTechStaff;
+    if (techApoyosView) techApoyosView.hidden = !isTechStaff;
     if (adminView) adminView.hidden = !canViewAdmin;
     const configNav = document.querySelector('.nav-item[data-view="configuracion"]');
     const configView = document.getElementById('view-configuracion');
@@ -1777,6 +1787,18 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
         }
 
         window.UTEAViewNavigation.activateView(document, viewId);
+        if (viewId === 'apoyos') {
+            window.ApoyosModule?.cargarApoyosAdmin?.();
+        }
+        if (viewId === 'tecnico-apoyos') {
+            window.ApoyosModule?.cargarTareasTecnico?.();
+        }
+        if (viewId === 'tickets') {
+            const tabMisApoyos = document.getElementById('tabMisApoyos');
+            if (tabMisApoyos && tabMisApoyos.style.borderBottom && tabMisApoyos.style.borderBottom.includes('solid')) {
+                window.ApoyosModule?.cargarMisSolicitudesApoyo?.();
+            }
+        }
     };
 
     document.querySelectorAll('.nav-item[data-view]').forEach(item => {
@@ -2830,6 +2852,12 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
                 // Icono según tipo
                 let icon, iconColor;
                 switch(n.tipo) {
+                    case 'recordatorio_apoyo': icon = 'ph-alarm'; iconColor = '#d97706'; break;
+                    case 'nueva_solicitud_apoyo': icon = 'ph-calendar-plus'; iconColor = '#2563eb'; break;
+                    case 'apoyo_programado': icon = 'ph-calendar-check'; iconColor = '#7c3aed'; break;
+                    case 'apoyo_observado': icon = 'ph-warning-circle'; iconColor = '#d97706'; break;
+                    case 'apoyo_aprobado': icon = 'ph-check-circle'; iconColor = '#16a34a'; break;
+                    case 'apoyo_impedido': icon = 'ph-prohibit'; iconColor = '#dc2626'; break;
                     case 'nuevo_ticket': icon = 'ph-ticket'; iconColor = '#0284c7'; break;
                     case 'estado_cambio': icon = 'ph-arrow-circle-right'; iconColor = '#16a34a'; break;
                     case 'nuevo_comentario': icon = 'ph-chat-circle-dots'; iconColor = '#9333ea'; break;
@@ -2850,7 +2878,17 @@ if (window.__UTEA_LEGACY_APP_BOOTSTRAPPED__) {
                 item.appendChild(row);
 
                 // Click en la notificación → abrir el ticket
-                if (n.ticket_id) {
+                if (n.apoyo_id) {
+                    item.onclick = (e) => {
+                        e.stopPropagation();
+                        document.querySelectorAll('.dropdown-menu').forEach(m => m.classList.remove('show'));
+                        window.ApoyosModule?.verDetalleApoyo?.(n.apoyo_id);
+                        fetch(`/api/notificaciones/${n.id}/leer`, {
+                            method: 'PUT',
+                            headers: { 'Authorization': `Bearer ${token}` }
+                        }).then(() => cargarNotificaciones());
+                    };
+                } else if (n.ticket_id) {
                     item.onclick = (e) => {
                         e.stopPropagation();
                         document.querySelectorAll('.dropdown-menu').forEach(m => m.classList.remove('show'));

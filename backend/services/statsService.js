@@ -1,4 +1,5 @@
 const db = require('../db');
+const { obtenerEstadisticasApoyos } = require('./apoyosStatsService');
 
 function monthWindowInLima() {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -70,7 +71,8 @@ async function getDashboardSummary() {
         tiempoPromedioHoras: safeAvg(resolutionRow.tiempoPromedioHoras),
         cumplimientoSlaRespuestaPct: safeAvg(responseComplianceRow.cumplimientoSlaRespuestaPct),
         cumplimientoSlaResolucionPct: safeAvg(resolutionComplianceRow.cumplimientoSlaResolucionPct),
-        evolucionMensual: monthlyRows.reverse().map(row => ({ ...row, cantidad: Number(row.cantidad) }))
+        evolucionMensual: monthlyRows.reverse().map(row => ({ ...row, cantidad: Number(row.cantidad) })),
+        apoyos: await obtenerEstadisticasApoyos()
     };
 }
 
@@ -90,6 +92,10 @@ async function getPersonalDashboardSummary(userId) {
         'SELECT COUNT(*) AS incidenciasCuentas FROM incidencias_cuentas WHERE usuario_id = ?',
         [userId]
     );
+    const [[apoyosSummary]] = await promiseDb.execute(
+        'SELECT COUNT(*) AS totalApoyos FROM solicitudes_apoyo WHERE user_id = ?',
+        [userId]
+    );
 
     const total = Number(ticketSummary.total);
     const solucionados = Number(ticketSummary.solucionados);
@@ -100,6 +106,7 @@ async function getPersonalDashboardSummary(userId) {
         solucionados,
         criticos: Number(ticketSummary.criticos),
         incidenciasCuentas: Number(accountSummary.incidenciasCuentas),
+        solicitudesApoyo: Number(apoyosSummary?.totalApoyos || 0),
         tasaResolucionPct: total ? Math.round(solucionados * 100 / total) : 0
     };
 }
